@@ -1,0 +1,135 @@
+[package]
+name = "matrix-goose"
+version = "0.1.0"
+edition = "2021"
+
+# [workspace]
+# members = [
+#     "src/*"
+# ]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+
+# e2e-encryption = [
+    # "matrix-sdk-base/e2e-encryption",
+    # "matrix-sdk-sled?/crypto-store",          # activate crypto-store on sled if given
+    # "matrix-sdk-indexeddb?/e2e-encryption",   # activate on indexeddb if given
+# ]
+
+# indexeddb = ["dep:matrix-sdk-indexeddb"]
+
+# [workspace.dependencies]
+[dependencies]
+csv = "^1.2"
+# genawaiter = "^0.99"
+goose = "^0.17"
+goose-eggs = "^0.5.1"
+# tokio = { version = "^1.27.0", features = ["full"] }
+
+# temp (base matrix-sdk toml)
+# matrix-sdk-base = "0.6.1"
+matrix-sdk-base  = { git = "https://github.com/matrix-org/matrix-rust-sdk", rev = "9ffcb8bc8a870d1fb597bf19e8db99aea16e2a91" }
+#matrix-sdk = "0.6.2"
+matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk", rev = "9ffcb8bc8a870d1fb597bf19e8db99aea16e2a91" }
+# matrix-sdk-common = { version = "0.6.0" }
+matrix-sdk-common = { git = "https://github.com/matrix-org/matrix-rust-sdk", rev = "9ffcb8bc8a870d1fb597bf19e8db99aea16e2a91" }
+# matrix-sdk-indexeddb = { version = "0.2.0", default-features = false, optional = true }
+# matrix-sdk-sled = { version = "0.2.0", default-features = false, optional = true }
+
+anymap2 = "0.13.0"
+async-stream = "0.3.3"
+async-trait = "0.1.60"
+bytes = "1.1.0"
+bytesize = "1.1"
+dashmap = "5.2.0"
+eyeball = "0.4.0"
+event-listener = "2.5.2"
+# futures = { version = "0.3.21", default-features = false, features = ["executor"] }
+futures-core = "0.3.21"
+futures-util = { version = "0.3.26", default-features = false, features = ["alloc"] }
+http = { version = "0.2.6" }
+
+# Adding due to Rust analyzer errors...
+# indexed_db_futures = { git = "https://github.com/Hywan/rust-indexed-db", rev = "4d0d213b47cf7ab018ec5f9fc4f1ce53e63c0762" }
+
+mime = "0.3.16"
+mime_guess = "2.0.4"
+# ruma = { git = "https://github.com/ruma/ruma", rev = "89e398fd062b4e763a3341fc7067428285d51d09", features = ["client-api-c"] }
+ruma = { git = "https://github.com/ruma/ruma", rev = "89e398fd062b4e763a3341fc7067428285d51d09", features = ["client-api-c", "canonical-json", "rand", "unstable-msc2448", "unstable-msc2965"] }
+ruma-common = { git = "https://github.com/ruma/ruma", rev = "89e398fd062b4e763a3341fc7067428285d51d09" }
+serde = "1.0.151"
+serde_json = "1.0.91"
+tempfile = "3.3.0"
+thiserror = "1.0.38"
+# tokio = { version = "1.24", default-features = false, features = ["sync"] }
+tracing = { version = "0.1.36", default-features = false, features = ["std"] }
+url = "2.2.2"
+
+# Required for test scripts
+rand = "0.8.5"
+rand_distr = "0.4.3"
+tokio = { version = "1.27.0", default-features = false, features = ["sync", "signal", "rt"] }
+# ruma-common = "0.10.5"
+
+[dependencies.reqwest]
+version = "0.11.10"
+default_features = false
+
+# ruma = { git = "https://github.com/ruma/ruma", rev = "8eea3e05490fa9a318f9ed66c3a75272e6ef0ee5", features = ["client-api-c"] }
+# ruma-common = { git = "https://github.com/ruma/ruma", rev = "8eea3e05490fa9a318f9ed66c3a75272e6ef0ee5" }
+# url = "2.2.2"
+
+# Matrix base SDK + dependencies
+# matrix-sdk-base = "0.6.1"
+
+# dashmap = "5.2.0"
+# eyeball = "0.4.0"
+# eyeball-im = "0.2.0"
+# futures-util = { version = "0.3.26", default-features = false, features = ["alloc"] }
+# ruma = { git = "https://github.com/ruma/ruma", rev = "8eea3e05490fa9a318f9ed66c3a75272e6ef0ee5", features = ["client-api-c"] }
+# ruma-common = { git = "https://github.com/ruma/ruma", rev = "8eea3e05490fa9a318f9ed66c3a75272e6ef0ee5" }
+# tracing = { version = "0.1.36", default-features = false, features = ["std"] }
+# serde_json = "1.0.91"
+
+# Matrix full SDK
+# futures-core = "0.3.21"
+# url = "2.2.2"
+# # matrix-sdk-common = { version = "0.6.0", path = "../matrix-sdk-common" }
+# matrix-sdk-common = { version = "0.6.0" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+backoff = { version = "0.4.0", features = ["tokio"] }
+# tokio = { workspace = true, features = ["fs", "rt"] }
+tokio = { version = "1.24", features = ["fs", "rt"] }
+
+# [dev-dependencies]
+# # anyhow = "1.0.57"
+# # dirs = "4.0.0"
+# futures = { version = "0.3.21", default-features = false, features = ["executor"] }
+# matches = "0.1.9"
+# matrix-sdk-test = { version = "0.6.0", path = "../../testing/matrix-sdk-test" }
+# once_cell = "1.10.0"
+# serde_json = "1.0.79"
+# tempfile = "3.3.0"
+# tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# ctor = "0.1.23"
+# tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.24", features = ["rt-multi-thread", "macros"] }
+
+[[bin]]
+name = "register"
+
+[[bin]]
+name = "create_room"
+
+[[bin]]
+name = "join"
+
+[[bin]]
+name = "chat"
+
