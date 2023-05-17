@@ -1,1 +1,9 @@
 /target
+
+users.csv
+rooms.json
+
+register.html
+create_room.html
+join.html
+chat.html
