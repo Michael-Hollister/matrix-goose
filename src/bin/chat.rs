@@ -70,8 +70,7 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
 
     // Load users from csv
     unsafe {
-        // if let Ok(mut reader) = csv::Reader::from_path("users.csv") {
-        if let Ok(mut reader) = csv::Reader::from_path("/home/michael/devenv/src/work/futo/matrix-goose/users.csv") {
+        if let Ok(mut reader) = csv::Reader::from_path("users.csv") {
             for entry in reader.deserialize::<User>() {
                 if let Ok(record) = entry {
                     // println!("{:?}", record);
