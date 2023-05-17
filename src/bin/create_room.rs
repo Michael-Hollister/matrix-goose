@@ -78,28 +78,40 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
             GOOSE_USERS.push(std::ptr::null_mut());
         }
 
-        if let Ok(mut reader) = csv::Reader::from_path("users.csv") {
-            let mut user_count = 0;
-            for entry in reader.deserialize::<User>() {
-                if let Ok(record) = entry {
-                    // println!("{:?}", record);
+        match csv::Reader::from_path("users.csv") {
+            Ok(mut reader) => {
+                let mut user_count = 0;
 
-                    USERS[user_count % num_users].push(record);
-                    user_count += 1;
+                for entry in reader.deserialize::<User>() {
+                    match entry {
+                        Ok(record) => {
+                            // println!("{:?}", record);
+                            USERS[user_count % num_users].push(record);
+                            user_count += 1;
+                        },
+                        Err(err) => panic!("Error reading user from users.csv: {}", err),
+                    }
                 }
-            }
+            },
+            Err(err) => panic!("Error reading users.csv: {}", err),
         }
 
         // Load rooms from csv
 
         // Open the file in read-only mode with buffer.
-        if let Ok(file) = File::open("rooms.json") {
-            let reader = BufReader::new(file);
+        match File::open("rooms.json") {
+            Ok(file) => {
+                let reader = BufReader::new(file);
 
-            // Read the JSON contents of the file as an instance of `User`.
-            if let Ok(rooms) = serde_json::from_reader::<_, RoomList>(reader) {
-                ROOMS = rooms;
-            }
+                // Read the JSON contents of the file as an instance of `User`.
+                match serde_json::from_reader::<_, RoomList>(reader) {
+                    Ok(rooms) => {
+                        ROOMS = rooms;
+                    },
+                    Err(err) => panic!("Error reading rooms.json contents: {}", err),
+                }
+            },
+            Err(err) => panic!("Error reading rooms.json: {}", err),
         }
     }
 

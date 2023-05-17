@@ -65,18 +65,24 @@ static CLIENTS_READER: &Vec<Arc<GooseMatrixClient>> = unsafe { &CLIENTS };
 
 const lorem_ipsum_text: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
-async fn setup(user: &mut GooseUser) -> TransactionResult {
+async fn setup(_user: &mut GooseUser) -> TransactionResult {
     println!("Setting up loadtest...");
 
     // Load users from csv
     unsafe {
-        if let Ok(mut reader) = csv::Reader::from_path("users.csv") {
-            for entry in reader.deserialize::<User>() {
-                if let Ok(record) = entry {
-                    // println!("{:?}", record);
-                    USERS.push(record);
+        match csv::Reader::from_path("users.csv") {
+            Ok(mut reader) => {
+                for entry in reader.deserialize::<User>() {
+                    match entry {
+                        Ok(record) => {
+                            // println!("{:?}", record);
+                            USERS.push(record);
+                        },
+                        Err(err) => panic!("Error reading user from users.csv: {}", err),
+                    }
                 }
-            }
+            },
+            Err(err) => panic!("Error reading users.csv: {}", err),
         }
     }
 
