@@ -15,6 +15,9 @@ use std::collections::HashMap;
 use rand_distr::{Exp, LogNormal, Distribution};
 
 
+use std::sync::Arc;
+// use lazy_static::lazy_static;
+
 // use matrix_sdk::Client;
 use matrix_sdk::ruma::{
     // api::client::{
@@ -54,11 +57,11 @@ struct ClientData {
     sync_forever_handle: JoinHandle<()>,
 }
 
-// Note: Consider changing to using mutex since a single goose user owns two threads (sync_forever and logic thread)
+// Note that a single goose user reference may required shared ownership between two threads (sync_forever and logic thread) depending on the current state of the tokio runtime task scheduler
 static mut USERS: Vec<User> = Vec::new();
 static USERS_READER: &Vec<User> = unsafe { &USERS };
-static mut CLIENTS: Vec<Option<GooseMatrixClient>> = Vec::new();
-static CLIENTS_READER: &Vec<Option<GooseMatrixClient>> = unsafe { &CLIENTS };
+static mut CLIENTS: Vec<Arc<GooseMatrixClient>> = Vec::new();
+static CLIENTS_READER: &Vec<Arc<GooseMatrixClient>> = unsafe { &CLIENTS };
 
 const lorem_ipsum_text: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
@@ -67,7 +70,8 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
 
     // Load users from csv
     unsafe {
-        if let Ok(mut reader) = csv::Reader::from_path("users.csv") {
+        // if let Ok(mut reader) = csv::Reader::from_path("users.csv") {
+        if let Ok(mut reader) = csv::Reader::from_path("/home/michael/devenv/src/work/futo/matrix-goose/users.csv") {
             for entry in reader.deserialize::<User>() {
                 if let Ok(record) = entry {
                     // println!("{:?}", record);
@@ -91,20 +95,23 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
     unsafe {
         let host = user.base_url.to_owned();
         GOOSE_USERS.push(user);
-        CLIENTS.push(Some(GooseMatrixClient::new(host, thread_index).await.unwrap()));
+        CLIENTS.push(Arc::new(GooseMatrixClient::new(host, thread_index).await.unwrap()));
 
+        let mut client = Arc::clone(&CLIENTS[thread_index]);
         let csv_user = &USERS_READER[thread_index];
         let username = csv_user.username.to_owned();
         let password = csv_user.password.to_owned();
-        match CLIENTS[thread_index].as_ref().unwrap().login_username(&username, &password).send().await {
+
+        match client.login_username(&username, &password).send().await {
             Ok(_) => {
                 println!("[{}] Logged in successfully", username);
 
-                // Spawn sync_forever thread
+                // Spawn sync_forever task
                 let handle = tokio::spawn(async move {
-                    if let Err(error) = CLIENTS[thread_index].as_ref().unwrap().sync(SyncSettings::default()).await {
-                        println!("[{}] Error starting sync_forever future: {:?}", username, error);
-                    }
+                        println!("Spawning sync_forever task");
+                        let _ = client.sync(SyncSettings::default()).await;
+                        println!("[{}] Warning sync_forever future returned early", username);
+
                 });
 
                 user.set_session_data(ClientData { room_id: None, room_tokens: HashMap::new(), sync_forever_handle: handle });
@@ -117,8 +124,6 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
             }
         }
     }
-
-
 }
 
 async fn on_stop(user: &mut GooseUser) -> TransactionResult {
@@ -140,10 +145,7 @@ async fn do_nothing(_user: &mut GooseUser) -> TransactionResult { Ok(()) }
 
 async fn send_text(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    // if CLIENTS_READER[thread_index].is_none() {
-    //     setup_client(user).await;
-    // }
-    let client = CLIENTS_READER[thread_index].as_ref().unwrap();
+    let client = Arc::clone(&CLIENTS_READER[thread_index]);
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::typing::create_typing_event::v3::Request as TypingRequest;
     use ruma::api::client::typing::create_typing_event::v3::Typing as Typing;
@@ -187,12 +189,7 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
 
 async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    // if CLIENTS_READER[thread_index].is_none() {
-    //     setup_client(user).await;
-    // }
-    let client = CLIENTS_READER[thread_index].as_ref().unwrap();
-
-
+    let client = Arc::clone(&CLIENTS_READER[thread_index]);
 
     // room_id = self.get_random_roomid()
     // if room_id is None:
@@ -220,10 +217,7 @@ async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
 // #       real client would do as the user scrolls the timeline.
 async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    // if CLIENTS_READER[thread_index].is_none() {
-    //     setup_client(user).await;
-    // }
-    let client = CLIENTS_READER[thread_index].as_ref().unwrap();
+    let client = Arc::clone(&CLIENTS_READER[thread_index]);
     let username = client.user_id().unwrap().localpart();
 
     let room_id;
@@ -253,9 +247,9 @@ async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
 
     match client.send(request, None).await {
         Ok(response) => {
-            if let Some(token) = response.response.unwrap().end {
-                client_data.room_tokens.insert(room_id, token);
-            }
+            // if let Some(token) = response.response.unwrap().end {
+            //     client_data.room_tokens.insert(room_id, token);
+            // }
         },
         Err(_) => println!("[{}] failed /messages failed for room [{}]", username, room_id),
     }
@@ -273,17 +267,16 @@ async fn go_afk(user: &mut GooseUser) -> TransactionResult {
     // Generate large(ish) random away time.
     let exp = Exp::new(1.0 / 600.0).unwrap(); // Expected value = 10 minutes
     let delay = exp.sample(&mut rand::thread_rng());
-    client_sleep(delay);
+    // client_sleep(delay).await;
+    client_sleep(4.0).await;
+    // tokio::task::yield_now().await;
 
     Ok(())
 }
 
 async fn change_displayname(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    // if CLIENTS_READER[thread_index].is_none() {
-    //     setup_client(user).await;
-    // }
-    let client = CLIENTS_READER[thread_index].as_ref().unwrap();
+    let client = Arc::clone(&CLIENTS_READER[thread_index]);
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::profile::set_display_name::v3::Request as Request;
 
@@ -310,11 +303,7 @@ async fn send_image(user: &mut GooseUser) -> TransactionResult {
 
 async fn send_reaction(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    // if CLIENTS_READER[thread_index].is_none() {
-    //     setup_client(user).await;
-    // }
-    let client = CLIENTS_READER[thread_index].as_ref().unwrap();
-    let client = CLIENTS_READER[thread_index].as_ref().unwrap();
+    let client = Arc::clone(&CLIENTS_READER[thread_index]);
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::message::send_message_event::v3::Request as MessageRequest;
     use ruma::events::room::message::RoomMessageEventContent as RoomMessage;
