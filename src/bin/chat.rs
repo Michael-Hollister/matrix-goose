@@ -9,6 +9,7 @@ use rand::seq::SliceRandom;
 use tokio::{
     task::JoinHandle,
     time::{sleep, Duration},
+    sync::RwLock,
 };
 use std::{
     collections::HashMap,
@@ -16,6 +17,7 @@ use std::{
 };
 
 use rand_distr::{Exp, LogNormal, Distribution};
+use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
 
 // use matrix_sdk::Client;
@@ -64,6 +66,10 @@ static USERS_READER: &Vec<User> = unsafe { &USERS };
 // threads (sync_forever and logic thread) depending on the current state of the tokio
 // runtime task scheduler.
 static mut CLIENTS: Lazy<HashMap<usize, Arc<GooseMatrixClient>>> = Lazy::new(|| { HashMap::new() });
+
+lazy_static! {
+    static ref CANCELED: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
+}
 
 const lorem_ipsum_text: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
@@ -124,10 +130,9 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
 
                 // Spawn sync_forever task
                 let handle = tokio::spawn(async move {
-                        println!("Spawning sync_forever task");
-                        let _ = client.sync(SyncSettings::default()).await;
-                        println!("[{}] Warning sync_forever future returned early", username);
-
+                    println!("Spawning sync_forever task");
+                    let _ = client.sync(SyncSettings::default()).await;
+                    println!("[{}] Warning sync_forever future returned early", username);
                 });
 
                 user.set_session_data(ClientData { room_id: None, room_tokens: HashMap::new(), sync_forever_handle: handle });
@@ -149,12 +154,23 @@ async fn on_stop(user: &mut GooseUser) -> TransactionResult {
     Ok(())
 }
 
-// note regarding goose teardown needing to terminate gracefully before writing report
+// Sleep handler that allows for graceful termination so reports can be generated
 async fn client_sleep(delay: f64) {
-    tokio::select! {
-        _ = sleep(Duration::from_secs_f64(delay)) => {},
-        _ = tokio::signal::ctrl_c() => {},
-    };
+    let mut count = delay;
+
+    // Task sleeping hangs goose termination for long sleep durations, so its needed
+    // frequently poll if sleep should be canceled.
+    while (count > 1.0) && !*CANCELED.read().await {
+        tokio::select! {
+            _ = sleep(Duration::from_secs_f64(1.0)) => { count -= 1.0; },
+            _ = tokio::signal::ctrl_c() => { *CANCELED.write().await = true; },
+        };
+    }
+
+    // Finish up remaining sleep time
+    if count.fract() > 0.0 {
+        sleep(Duration::from_secs_f64(count.fract())).await;
+    }
 }
 
 async fn do_nothing(_user: &mut GooseUser) -> TransactionResult { Ok(()) }
@@ -186,7 +202,7 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
     // Sleep while we pretend the user is banging on the keyboard
     let exp = Exp::new(1.0 / 5.0).unwrap();
     let delay = exp.sample(&mut rand::thread_rng());
-    client_sleep(delay);
+    client_sleep(delay).await;
 
     let words: Vec<&str> = lorem_ipsum_text.split(" ").collect();
     let log_normal = LogNormal::new(1.0, 1.0).unwrap();
@@ -283,9 +299,7 @@ async fn go_afk(user: &mut GooseUser) -> TransactionResult {
     // Generate large(ish) random away time.
     let exp = Exp::new(1.0 / 600.0).unwrap(); // Expected value = 10 minutes
     let delay = exp.sample(&mut rand::thread_rng());
-    // client_sleep(delay).await;
-    client_sleep(4.0).await;
-    // tokio::task::yield_now().await;
+    client_sleep(delay).await;
 
     Ok(())
 }

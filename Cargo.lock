@@ -1601,6 +1601,7 @@ dependencies = [
  "goose",
  "goose-eggs",
  "http",
+ "lazy_static",
  "matrix-sdk",
  "matrix-sdk-base",
  "matrix-sdk-common",
