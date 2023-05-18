@@ -10,13 +10,13 @@ use tokio::{
     task::JoinHandle,
     time::{sleep, Duration},
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+};
 
 use rand_distr::{Exp, LogNormal, Distribution};
-
-
-use std::sync::Arc;
-// use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
 // use matrix_sdk::Client;
 use matrix_sdk::ruma::{
@@ -57,13 +57,19 @@ struct ClientData {
     sync_forever_handle: JoinHandle<()>,
 }
 
-// Note that a single goose user reference may required shared ownership between two threads (sync_forever and logic thread) depending on the current state of the tokio runtime task scheduler
 static mut USERS: Vec<User> = Vec::new();
 static USERS_READER: &Vec<User> = unsafe { &USERS };
-static mut CLIENTS: Vec<Arc<GooseMatrixClient>> = Vec::new();
-static CLIENTS_READER: &Vec<Arc<GooseMatrixClient>> = unsafe { &CLIENTS };
+
+// Note that a single goose user reference may required shared ownership between two
+// threads (sync_forever and logic thread) depending on the current state of the tokio
+// runtime task scheduler.
+static mut CLIENTS: Lazy<HashMap<usize, Arc<GooseMatrixClient>>> = Lazy::new(|| { HashMap::new() });
 
 const lorem_ipsum_text: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+
+async fn get_client(index: usize) -> Arc<GooseMatrixClient> {
+    unsafe { return Arc::clone(&CLIENTS.get(&index).unwrap()) }
+}
 
 async fn setup(_user: &mut GooseUser) -> TransactionResult {
     println!("Setting up loadtest...");
@@ -84,6 +90,9 @@ async fn setup(_user: &mut GooseUser) -> TransactionResult {
             },
             Err(err) => panic!("Error reading users.csv: {}", err),
         }
+
+        // Resize CLIENTS to prevent multiple re-allocations
+        CLIENTS.reserve(USERS.len());
     }
 
     Ok(())
@@ -100,9 +109,11 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
     unsafe {
         let host = user.base_url.to_owned();
         GOOSE_USERS.push(user);
-        CLIENTS.push(Arc::new(GooseMatrixClient::new(host, thread_index).await.unwrap()));
 
-        let mut client = Arc::clone(&CLIENTS[thread_index]);
+        let static_client_ref = Arc::new(GooseMatrixClient::new(host, thread_index).await.unwrap());
+        CLIENTS.insert(thread_index, static_client_ref);
+
+        let mut client = Arc::clone(&CLIENTS[&thread_index]);
         let csv_user = &USERS_READER[thread_index];
         let username = csv_user.username.to_owned();
         let password = csv_user.password.to_owned();
@@ -150,7 +161,7 @@ async fn do_nothing(_user: &mut GooseUser) -> TransactionResult { Ok(()) }
 
 async fn send_text(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    let client = Arc::clone(&CLIENTS_READER[thread_index]);
+    let client = get_client(thread_index).await;
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::typing::create_typing_event::v3::Request as TypingRequest;
     use ruma::api::client::typing::create_typing_event::v3::Typing as Typing;
@@ -194,7 +205,7 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
 
 async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    let client = Arc::clone(&CLIENTS_READER[thread_index]);
+    let client = get_client(thread_index).await;
 
     // room_id = self.get_random_roomid()
     // if room_id is None:
@@ -222,7 +233,7 @@ async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
 // #       real client would do as the user scrolls the timeline.
 async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    let client = Arc::clone(&CLIENTS_READER[thread_index]);
+    let client = get_client(thread_index).await;
     let username = client.user_id().unwrap().localpart();
 
     let room_id;
@@ -281,7 +292,7 @@ async fn go_afk(user: &mut GooseUser) -> TransactionResult {
 
 async fn change_displayname(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    let client = Arc::clone(&CLIENTS_READER[thread_index]);
+    let client = get_client(thread_index).await;
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::profile::set_display_name::v3::Request as Request;
 
@@ -308,7 +319,7 @@ async fn send_image(user: &mut GooseUser) -> TransactionResult {
 
 async fn send_reaction(user: &mut GooseUser) -> TransactionResult {
     let thread_index = user.weighted_users_index;
-    let client = Arc::clone(&CLIENTS_READER[thread_index]);
+    let client = get_client(thread_index).await;
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::message::send_message_event::v3::Request as MessageRequest;
     use ruma::events::room::message::RoomMessageEventContent as RoomMessage;

@@ -1606,6 +1606,7 @@ dependencies = [
  "matrix-sdk-common",
  "mime",
  "mime_guess",
+ "once_cell",
  "rand 0.8.5",
  "rand_distr",
  "reqwest",
