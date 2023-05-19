@@ -1,41 +1,25 @@
 use goose::prelude::*;
-use std::time::Duration;
-
+use std::{
+    time::Duration,
+    fs::File,
+    io::BufReader,
+};
 use serde::Deserialize;
 
 use matrix_sdk::ruma::{
     api::client::{
-        // account::register::{v3::Request as RegistrationRequest, RegistrationKind},
-        // uiaa,
         room::{
             create_room::v3::Request as CreateRoomRequest,
-            // Visibility,
         }
     },
-    // DeviceId,
-
 };
-
 use ruma_common::{
     UserId, OwnedUserId,
 };
 
-
-// use ruma::user_id
-
-use url::Url;
-
-// use std::error::Error;
-use std::fs::File;
-use std::io::BufReader;
-// use std::path::Path;
-
-// mod matrix;
 use matrix_goose::matrix::{
     GooseMatrixClient,
-    MatrixResponse,
-    MatrixError,
-    GOOSE_USERS, //GOOSE_USERS_READER,
+    GOOSE_USERS,
 };
 
 
@@ -59,8 +43,8 @@ struct RoomList {
 
 
 // For setup tests, only a single thread access its own client
-static mut USERS: Vec<Vec<User>> = Vec::new();
-static USERS_READER: &Vec<Vec<User>> = unsafe { &USERS };
+static mut USERS: Vec<User> = Vec::new();
+static USERS_READER: &Vec<User> = unsafe { &USERS };
 
 static mut ROOMS: RoomList = RoomList { creators: Vec::new() };
 static ROOMS_READER: &RoomList = unsafe { &ROOMS };
@@ -74,20 +58,16 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
         let num_users = user.config.users.unwrap();
 
         for _ in 0 .. num_users {
-            USERS.push(Vec::new());
             GOOSE_USERS.push(std::ptr::null_mut());
         }
 
         match csv::Reader::from_path("users.csv") {
             Ok(mut reader) => {
-                let mut user_count = 0;
-
                 for entry in reader.deserialize::<User>() {
                     match entry {
                         Ok(record) => {
                             // println!("{:?}", record);
-                            USERS[user_count % num_users].push(record);
-                            user_count += 1;
+                            USERS.push(record);
                         },
                         Err(err) => panic!("Error reading user from users.csv: {}", err),
                     }
@@ -118,7 +98,7 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
     Ok(())
 }
 
-async fn teardown(user: &mut GooseUser) -> TransactionResult {
+async fn teardown(_user: &mut GooseUser) -> TransactionResult {
     println!("Tearing down loadtest...");
 
     Ok(())
@@ -126,32 +106,25 @@ async fn teardown(user: &mut GooseUser) -> TransactionResult {
 
 
 async fn create_room(user: &mut GooseUser) -> TransactionResult {
-    let thread_index = user.weighted_users_index;
-    let user_ctr = user.get_iterations();
-
-    // println!("Goose iterations: {}", user.get_iterations());
+    let user_index = user.weighted_users_index;
 
     // Load the next user who needs to be registered
-    if user_ctr < USERS_READER[thread_index].len() {
-        let csv_user = &USERS_READER[thread_index][user_ctr];
-        println!("Thread {}: Got user/pass {} {}", thread_index, csv_user.username, csv_user.password);
+    let csv_user = &USERS_READER[user_index];
+    println!("User {}: Got user/pass {} {}", user_index, csv_user.username, csv_user.password);
 
-        // Create matrix client
-        let username = &csv_user.username.to_owned();
-        let password = &csv_user.password.to_owned();
-        let host = user.base_url.to_owned();
+    // Create matrix client
+    let username = &csv_user.username.to_owned();
+    let password = &csv_user.password.to_owned();
+    let host = user.base_url.to_owned();
 
+    // Populate static table used by matrix API for interfacing with Goose
+    unsafe { GOOSE_USERS[user_index] = user };
 
-        // Populate static table used by matrix API for interfacing with Goose
-        unsafe { GOOSE_USERS[thread_index] = user };
+    if ROOMS_READER.creators.iter().filter(|&room_info| room_info.creator == *username).count() > 0 {
+        let client = GooseMatrixClient::new(host, user_index).await.unwrap();
 
-
-        // let client = GooseMatrixClient::new(test_url, user).await.unwrap();
-        if ROOMS_READER.creators.iter().filter(|&room_info| room_info.creator == *username).count() > 0 {
-            let client = GooseMatrixClient::new(host, thread_index).await.unwrap();
-
-            println!("Making login request for {}", username);
-            if let response1 = client.login_username(username, password).send().await {
+        match client.login_username(username, password).send().await {
+            Ok(_) => {
                 let rooms_iter = ROOMS_READER.creators.iter().filter(|&room_info| room_info.creator == *username);
 
                 for room_info in rooms_iter {
@@ -169,51 +142,34 @@ async fn create_room(user: &mut GooseUser) -> TransactionResult {
                         invite_list.push(user_id);
                     }
 
-                    // request.name = Some(room_name);
-
                     request.name = Some(room_name.clone());
                     request.invite = invite_list;
-                    // request.invite = invite_list.to_owned();
 
-                    // println!("Making room creation request for {} with room name {} and invite list {:?}", username, room_name, invite_list);
-                    println!("Making room creation request for {} with room name {}", username, room_name);
-                    // println!("Session token? {:?}", client.access_token());
-                    let response2 = client.create_room(request).await;
-                    println!("Response: {}", response2.unwrap().room_id() );
+                    let mut retries = 3;
+
+                    // Send request, retry if necessary
+                    while retries > 0 {
+                        match client.create_room(request.to_owned()).await {
+                            Ok(response) => {
+                                println!("[{}] Created room {}", username, response.room_id());
+                                break;
+                            },
+                            Err(err) => {
+                                println!("[{}] Could not create room {} (attempt {}): {:?}. Trying again...",
+                                    username, room_name, 4 - retries, err);
+                                retries -= 1;
+
+                                if retries == 0 {
+                                    println!("[{}] Error creating room {}. Skipping...", username, room_name);
+                                    break;
+                                }
+                            },
+                        }
+                    }
                 }
-            }
-            else {
-                println!("Failed login for {}", username);
-            }
+            },
+            Err(err) => { println!("[{}] Failed login: {:?}", username, err); },
         }
-        else {
-            println!("No rooms to create for user {}", username);
-        }
-
-
-        //     # Actually create the room
-        //     retries = 3
-        //     while retries > 0:
-        //         response = self.matrix_client.room_create(alias=None, name=room_name, invite=user_ids)
-
-        //         if isinstance(response, RoomCreateError):
-        //             logging.error("[%s] Could not create room %s (attempt %d). Trying again...",
-        //                          self.matrix_client.user, room_name, 4 - retries)
-        //             logging.error("[%s] Code=%s, Message=%s", self.matrix_client.user,
-        //                           response.status_code, response.message)
-        //             retries -= 1
-        //         else:
-        //             logging.info("[%s] Created room [%s]", self.matrix_client.user, response.room_id)
-        //             break
-
-        //     if retries == 0:
-        //         logging.error("[%s] Error creating room %s. Skipping...",
-        //                       self.matrix_client.user, room_name)
-
-
-    }
-    else {
-        // println!("out of users");
     }
 
     Ok(())
