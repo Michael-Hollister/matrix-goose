@@ -1,7 +1,7 @@
-# Matrix load generation with Locust
+# Matrix load generation with Goose
 
-This project provides Python classes and scripts for load testing
-[Matrix](https://matrix.org/) servers using [Locust](https://locust.io/).
+This project provides scripts for load testing [Matrix](https://matrix.org/)
+servers using [Goose](https://docs.rs/goose/latest/goose/).
 
 ## Getting started
 
@@ -23,19 +23,16 @@ for an Ansible playbook that can be used to install and configure Synapse,
 Dendrite, and Conduit, along with any required databases and other
 homeserver accessories.
 
-You also need [Locust](https://github.com/locustio/locust) (v2.14.0+) installed
-on the machine that you will be using to generate load on your server.
-
 ### Generating users and rooms
 
-Before you can use the Locust scripts to load your Matrix server, you
-first need to generate usernames and passwords for your Locust users,
+Before you can use the Goose scripts to load your Matrix server, you
+first need to generate usernames and passwords for your Goose users,
 as well as the set of rooms where they will chat with each other.
 
 First we generate the usernames and passwords.
 
 ```console
-[user@host matrix-locust]$ python3 generate_users.py
+[user@host matrix-goose]$ python3 generate_users.py
 ```
 
 This generates 1000 users by default and saves the usernames and passwords to
@@ -47,7 +44,7 @@ The `generate_rooms.py` script generates as many rooms as there are users
 in `users.csv`.
 
 ```console
-[user@host matrix-locust]$ python3 generate_rooms.py
+[user@host matrix-goose]$ python3 generate_rooms.py
 ```
 
 The script decides how many users should be in each room according to an "80/20"
@@ -62,54 +59,43 @@ It saves the room names and the user-room assignments in the file `rooms.json`.
 
 ## Running the tests
 
-The following examples show just a few things that we can do with Locust.
+The following examples show just a few things that we can do with Goose.
 
 In fact, the user registration script and the room creation script (1 and 2 below)
 were not originally intended to stress the server.
 
-After running one of the scripts, you can navigate in your web-browser to
-`http://0.0.0.0:8089/` to open the Locust interface. From there, you can set
-the amount of users, spawn-rate, host URL, and max duration of the test. After
-setting the parameters, you can start the test and view the statistics/graphs
-in the web UI.
-
-You may need to play around with the total number of users and the spawn rate
-to find a configuration that your homeserver can handle. Note that for scripts
-1-3, if you specify a smaller amount of Locust users than the amount you have
-generated in `users.csv`, all users/rooms will still be registered/created
-(Locust users determine the amount of concurrent open connections to the
-server).
+You may need to play around with the total number of users and the hatch rate
+to find a configuration that your homeserver can handle.
 
 1. Registering user accounts
 
 ```console
-$ python run.py matrix-locust/client_server/register.py
+[user@host matrix-goose]$ cargo run --bin register --release -- --host YOUR_HOMESERVER --report-file=register.html --users 1000 --iterations 1 --hatch-rate 10
 ```
 
 2. Creating rooms
 
 ```console
-$ python run.py matrix-locust/client_server/create_room.py
+[user@host matrix-goose]$ cargo run --bin create_room --release -- --host YOUR_HOMESERVER --report-file=create_room.html --users 1000 --iterations 1 --hatch-rate 10
 ```
 
 3. Accepting invites to join rooms
 
 ```console
-$ python run.py matrix-locust/client_server/join.py
+[user@host matrix-goose]$ cargo run --bin join --release -- --host YOUR_HOMESERVER --report-file=join.html --users 1000 --iterations 1 --hatch-rate 10
 ```
 
 4. Normal chat activity -- Accepting any pending invites, sending messages, paginating rooms
 
 ```console
-$ python run.py locust-run-users.py
+[user@host matrix-goose]$ cargo run --bin chat --release -- --host YOUR_HOMESERVER --report-file=chat.html --no-reset-metrics --users 1000 --hatch-rate 10
 ```
 
-You can also directly run Locust without using the helper `run.py` script
-if you prefer to have more control of the Locust parameters. See the
-[Locust Configuration](https://docs.locust.io/en/stable/configuration.html)
-section in the documentation for further details.
+Note that you also have the ability to modify parameters at runtime. See the
+[Controllers](https://book.goose.rs/controller/overview.html) documentation
+for more information.
 
-## Running automated tests
+## Running automated tests [Not ported to Goose yet]
 
 This repository supports the ability to run automated tests. You can define
 test suites, which are JSON files that describes a series of tests along with
@@ -130,50 +116,5 @@ prefix the host argument with `https://`.
 
 ## Writing your own tests
 
-The base class for interacting with a Matrix homeserver is [MatrixUser](./matrixuser.py).
-
-For an example of a class that extends `MatrixUser` to generate traffic
-like a real user, see [MatrixChatUser](./matrixchatuser.py).
-
-
-circlese specific setup
-
-also pip for matrix-nio?
-
-
-
-```
-git submodule init
-git submodule update
-
-pip install cffi
-make c bssepke
-make python bssepek
-
-```
-
----
-temp setup commands
-
-mkdir /matrix
-cd /matrix/
-yum install nano git wget docker gcc
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source "$HOME/.cargo/env"
-cargo install just
-dnf install epel-release ansible
-ssh-keygen -t ed25519
-git clone https://github.com/cvwright/matrix-docker-ansible-deploy.git .
-git checkout swiclops
-
-
-
-copy ssh, inventory hosts, vars.yml, swiclops (and related configuration) -- note that swiclops had to be updated to feb 7th commit, by copying existing .git or updating and rebaseing some 2nd remote
-
-
-just roles
-ssh into itself
-fixing: systemd-timesyncd.service: Start request repeated too quickly | disabling se linux...
-setenforce 0
-
-
+The base script for interacting with a Matrix homeserver and generating traffic
+like a real user is [chat.rs](./src/bin/chat.rs).
