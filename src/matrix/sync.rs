@@ -216,12 +216,10 @@ impl GooseMatrixClient {
 
         match response {
             Ok(r) => {
-                let r = r.response.unwrap();
                 sync_settings.token = Some(r.next_batch.clone());
                 Ok(r)
             }
             Err(e) => {
-                let e = e.error.unwrap();
                 error!("Received an invalid response: {e}");
                 Err(e)
             }

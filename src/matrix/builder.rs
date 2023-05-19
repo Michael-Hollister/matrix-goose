@@ -387,13 +387,11 @@ impl GooseClientBuilder {
                         &[MatrixVersion::V1_0],
                         self.goose_user_index,
                     )
-                    // .await
-                    .await?.response.unwrap();
-                    // TODO: Add back error mapping after initial testing
-                    // .map_err(|e| match e {
-                    //     HttpError::Api(err) => ClientBuildError::AutoDiscovery(err),
-                    //     err => ClientBuildError::Http(err),
-                    // })?;
+                    .await
+                    .map_err(|e| match e {
+                        HttpError::Api(err) => ClientBuildError::AutoDiscovery(err),
+                        err => ClientBuildError::Http(err),
+                    })?;
 
                 authentication_issuer = well_known.authentication.map(|auth| auth.issuer);
 

@@ -8,7 +8,7 @@ use matrix_sdk::{BaseRoom};
 use crate::matrix::{
     room::{Common, RoomState},
     error::Result,
-    GooseMatrixClient, MatrixResponse, MatrixError, Error,
+    GooseMatrixClient,
 };
 
 /// A room in the left state.
@@ -47,14 +47,12 @@ impl Left {
     /// Forget this room.
     ///
     /// This communicates to the homeserver that it should forget the room.
-    // pub async fn forget(&self) -> Result<()> {
-    pub async fn forget(&self) -> Result<MatrixResponse<forget_room::v3::Response>, MatrixError<Error>> {
+    pub async fn forget(&self) -> Result<()> {
         let request = forget_room::v3::Request::new(self.inner.room_id().to_owned());
         let _response = self.client.send(request, None).await?;
         self.client.store().remove_room(self.inner.room_id()).await?;
 
-        // Ok(())
-        Ok(_response)
+        Ok(())
     }
 }
 

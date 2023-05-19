@@ -43,7 +43,7 @@ use tokio::{fs::File as TokioFile, io::AsyncWriteExt};
 use crate::matrix::{
     attachment::{AttachmentInfo, Thumbnail},
     error::Result,
-    GooseMatrixClient, MatrixResponse, MatrixError, Error,
+    GooseMatrixClient,
 };
 
 /// A conservative upload speed of 1Mbps
@@ -114,8 +114,7 @@ impl Media {
         &self,
         content_type: &Mime,
         data: Vec<u8>,
-    // ) -> Result<create_content::v3::Response> {
-    ) -> Result<MatrixResponse<create_content::v3::Response>, MatrixError<Error>> {
+    ) -> Result<create_content::v3::Response> {
         let timeout = std::cmp::max(
             Duration::from_secs(data.len() as u64 / DEFAULT_UPLOAD_SPEED),
             MIN_UPLOAD_REQUEST_TIMEOUT,
@@ -151,8 +150,7 @@ impl Media {
         content_type: &Mime,
         use_cache: bool,
     ) -> Result<MediaFileHandle> {
-        // let data = self.get_media_content(request, use_cache).await?;
-        let data = self.get_media_content(request, use_cache).await?.response.unwrap();
+        let data = self.get_media_content(request, use_cache).await?;
 
         let mut suffix = String::from("");
         if let Some(extension) =
@@ -181,21 +179,18 @@ impl Media {
         &self,
         request: &MediaRequest,
         use_cache: bool,
-    // ) -> Result<Vec<u8>> {
-    ) -> Result<MatrixResponse<Vec<u8>>, MatrixError<Error>> {
+    ) -> Result<Vec<u8>> {
         let content =
             if use_cache { self.client.store().get_media_content(request).await? } else { None };
 
         if let Some(content) = content {
-            // return Ok(content);
-            return Ok(MatrixResponse { request: None, response: Some(content)});
+            return Ok(content);
         }
 
         let content: Vec<u8> = match &request.source {
             MediaSource::Encrypted(file) => {
                 let request = get_content::v3::Request::from_url(&file.url)?;
-                // let content: Vec<u8> = self.client.send(request, None).await?.file;
-                let content: Vec<u8> = self.client.send(request, None).await?.response.unwrap().file;
+                let content: Vec<u8> = self.client.send(request, None).await?.file;
 
                 #[cfg(feature = "e2e-encryption")]
                 let content = {
@@ -217,12 +212,10 @@ impl Media {
                 if let MediaFormat::Thumbnail(size) = &request.format {
                     let request =
                         get_content_thumbnail::v3::Request::from_url(uri, size.width, size.height)?;
-                    // self.client.send(request, None).await?.file
-                    self.client.send(request, None).await?.response.unwrap().file
+                    self.client.send(request, None).await?.file
                 } else {
                     let request = get_content::v3::Request::from_url(uri)?;
-                    // self.client.send(request, None).await?.file
-                    self.client.send(request, None).await?.response.unwrap().file
+                    self.client.send(request, None).await?.file
                 }
             }
         };
@@ -231,8 +224,7 @@ impl Media {
             self.client.store().add_media_content(request, content.clone()).await?;
         }
 
-        // Ok(content)
-        Ok(MatrixResponse { request: None, response: Some(content) })
+        Ok(content)
     }
 
     /// Remove a media file's content from the store.
@@ -273,17 +265,12 @@ impl Media {
         &self,
         event_content: impl MediaEventContent,
         use_cache: bool,
-    // ) -> Result<Option<Vec<u8>>> {
-    ) -> Result<MatrixResponse<Option<Vec<u8>>>, MatrixError<Error>> {
-        // let Some(source) = event_content.source() else { return Ok(None) };
-        let Some(source) = event_content.source() else {
-            return Ok(MatrixResponse { request: None, response: None });
-        };
+    ) -> Result<Option<Vec<u8>>> {
+        let Some(source) = event_content.source() else { return Ok(None) };
         let file = self
             .get_media_content(&MediaRequest { source, format: MediaFormat::File }, use_cache)
             .await?;
-        // Ok(Some(file))
-        Ok(MatrixResponse { request: None, response: Some(file.response) })
+        Ok(Some(file))
     }
 
     /// Remove the file of the given media event content from the cache.
@@ -325,21 +312,15 @@ impl Media {
         event_content: impl MediaEventContent,
         size: MediaThumbnailSize,
         use_cache: bool,
-    // ) -> Result<Option<Vec<u8>>> {
-    ) -> Result<MatrixResponse<Option<Vec<u8>>>, MatrixError<Error>> {
-        // let Some(source) = event_content.thumbnail_source() else { return Ok(None) };
-        let Some(source) = event_content.thumbnail_source() else {
-            // return Ok(None)
-            return Ok(MatrixResponse { request: None, response: None });
-        };
+    ) -> Result<Option<Vec<u8>>> {
+        let Some(source) = event_content.thumbnail_source() else { return Ok(None) };
         let thumbnail = self
             .get_media_content(
                 &MediaRequest { source, format: MediaFormat::Thumbnail(size) },
                 use_cache,
             )
             .await?;
-        // Ok(Some(thumbnail))
-        Ok(MatrixResponse { request: None, response: Some(thumbnail.response) })
+        Ok(Some(thumbnail))
     }
 
     /// Remove the thumbnail of the given media event content from the cache.
@@ -378,12 +359,10 @@ impl Media {
         data: Vec<u8>,
         info: Option<AttachmentInfo>,
         thumbnail: Option<Thumbnail>,
-    // ) -> Result<ruma::events::room::message::MessageType> {
-    ) -> Result<MatrixResponse<ruma::events::room::message::MessageType>, MatrixError<Error>> {
+    ) -> Result<ruma::events::room::message::MessageType> {
         let (thumbnail_source, thumbnail_info) = if let Some(thumbnail) = thumbnail {
             let response = self.upload(&thumbnail.content_type, thumbnail.data).await?;
-            // let url = response.content_uri;
-            let url = response.response.unwrap().content_uri;
+            let url = response.content_uri;
 
             use ruma::events::room::ThumbnailInfo;
             let thumbnail_info = assign!(
@@ -398,8 +377,7 @@ impl Media {
 
         let response = self.upload(content_type, data).await?;
 
-        // let url = response.content_uri;
-        let url = response.response.unwrap().content_uri;
+        let url = response.content_uri;
 
         use ruma::events::room::{self, message};
         Ok(match content_type.type_() {
@@ -409,33 +387,21 @@ impl Media {
                     thumbnail_source,
                     thumbnail_info,
                 });
-                // message::MessageType::Image(message::ImageMessageEventContent::plain(
-                //     body.to_owned(),
-                //     url,
-                //     Some(Box::new(info)),
-                // ))
-                let message = message::MessageType::Image(message::ImageMessageEventContent::plain(
+                message::MessageType::Image(message::ImageMessageEventContent::plain(
                     body.to_owned(),
                     url,
                     Some(Box::new(info)),
-                ));
-                MatrixResponse { request: None, response: Some(message) }
+                ))
             }
             mime::AUDIO => {
                 let info = assign!(info.map(message::AudioInfo::from).unwrap_or_default(), {
                     mimetype: Some(content_type.as_ref().to_owned()),
                 });
-                // message::MessageType::Audio(message::AudioMessageEventContent::plain(
-                //     body.to_owned(),
-                //     url,
-                //     Some(Box::new(info)),
-                // ))
-                let message = message::MessageType::Audio(message::AudioMessageEventContent::plain(
+                message::MessageType::Audio(message::AudioMessageEventContent::plain(
                     body.to_owned(),
                     url,
                     Some(Box::new(info)),
-                ));
-                MatrixResponse { request: None, response: Some(message) }
+                ))
             }
             mime::VIDEO => {
                 let info = assign!(info.map(message::VideoInfo::from).unwrap_or_default(), {
@@ -443,17 +409,11 @@ impl Media {
                     thumbnail_source,
                     thumbnail_info
                 });
-                // message::MessageType::Video(message::VideoMessageEventContent::plain(
-                //     body.to_owned(),
-                //     url,
-                //     Some(Box::new(info)),
-                // ))
-                let message = message::MessageType::Video(message::VideoMessageEventContent::plain(
+                message::MessageType::Video(message::VideoMessageEventContent::plain(
                     body.to_owned(),
                     url,
                     Some(Box::new(info)),
-                ));
-                MatrixResponse { request: None, response: Some(message) }
+                ))
             }
             _ => {
                 let info = assign!(info.map(message::FileInfo::from).unwrap_or_default(), {
@@ -461,17 +421,11 @@ impl Media {
                     thumbnail_source,
                     thumbnail_info
                 });
-                // message::MessageType::File(message::FileMessageEventContent::plain(
-                //     body.to_owned(),
-                //     url,
-                //     Some(Box::new(info)),
-                // ))
-                let message = message::MessageType::File(message::FileMessageEventContent::plain(
+                message::MessageType::File(message::FileMessageEventContent::plain(
                     body.to_owned(),
                     url,
                     Some(Box::new(info)),
-                ));
-                MatrixResponse { request: None, response: Some(message) }
+                ))
             }
         })
     }

@@ -42,7 +42,7 @@ use reqwest::RequestBuilder;
 use crate::matrix::{
     config::RequestConfig,
     error::HttpError,
-    MatrixResponse, MatrixError, GooseMatrixClient,
+    GooseMatrixClient,
     GOOSE_USERS,
 };
 
@@ -108,8 +108,7 @@ pub trait HttpSend: AsyncTraitDeps {
         request: http::Request<Bytes>,
         timeout: Duration,
         goose_user_index: usize,
-    // ) -> Result<http::Response<Bytes>, HttpError>;
-    ) -> Result<MatrixResponse<http::Response<Bytes>>, MatrixError<HttpError>>;
+    ) -> Result<http::Response<Bytes>, HttpError>;
 }
 
 #[derive(Debug)]
@@ -246,10 +245,8 @@ impl HttpClient {
                     .inner
                     // .send_request(clone_request(&request), config.timeout)
                     .send_request(clone_request(&request), config.timeout, goose_user_index)
-                    // .await
-                    .await.unwrap().response.unwrap();
-                    // .map_err(error_type)?;
-                    // TODO: Add back error mapping after initial testing
+                    .await
+                    .map_err(error_type)?;
 
                 let status_code = response.status();
                 let response_size = ByteSize(response.body().len().try_into().unwrap_or(u64::MAX));
@@ -297,8 +294,7 @@ impl HttpClient {
         user_id: Option<&UserId>,
         server_versions: &[MatrixVersion],
         goose_user_index: usize,
-    // ) -> Result<R::IncomingResponse, HttpError>
-    ) -> Result<MatrixResponse<R::IncomingResponse>, MatrixError<HttpError>>
+    ) -> Result<R::IncomingResponse, HttpError>
     where
         R: OutgoingRequest + Debug,
         HttpError: From<FromHttpResponseError<R::EndpointError>>,
@@ -324,8 +320,7 @@ impl HttpClient {
 
         let auth_scheme = R::METADATA.authentication;
         if !matches!(auth_scheme, AuthScheme::AccessToken | AuthScheme::None) {
-            // return Err(HttpError::NotClientRequest);
-            return Err(MatrixError { error: Some(HttpError::NotClientRequest), goose_error: None });
+            return Err(HttpError::NotClientRequest);
         }
 
         let request = self.serialize_request(
@@ -363,14 +358,12 @@ impl HttpClient {
                     .record("response_size", response_size.to_string_as(true));
                 debug!("Got response");
 
-                // Ok(response)
-                Ok(MatrixResponse { request: None, response: Some(response)})
+                Ok(response)
             }
             Err(e) => {
                 debug!("Error while sending request: {e:?}");
 
-                // Err(e)
-                Err(MatrixError { error: Some(e), goose_error: None })
+                Err(e)
             }
         }
     }
@@ -469,8 +462,7 @@ impl HttpSend for reqwest::Client {
         request: http::Request<Bytes>,
         _timeout: Duration,
         goose_user_index: usize,
-    // ) -> Result<http::Response<Bytes>, HttpError> {
-    ) -> Result<MatrixResponse<http::Response<Bytes>>, MatrixError<HttpError>> {
+    ) -> Result<http::Response<Bytes>, HttpError> {
         #[allow(unused_mut)]
         let mut request = reqwest::Request::try_from(request)?;
 
@@ -547,15 +539,40 @@ impl HttpSend for reqwest::Client {
         // Note: Consider changing to using mutex since a single goose user owns two threads (sync_forever and logic thread)
         // Also improve error handling
         let user: &mut GooseUser = unsafe { GOOSE_USERS[goose_user_index].as_mut().unwrap() };
-        let goose_response = user.request(goose_request).await.unwrap();
 
-        // println!("Got response: {:?}", goose_response);
-        let response = goose_response.response?;
+        match user.request(goose_request).await {
+            Ok(goose_response) => {
+                // If required in the future, consider adding global response vector for access in scripts.
+                // Easier to maintain than propagating response results through all the various function
+                // signatures
+                let response = goose_response.response?;
 
-        // Goose integration end
+                // println!("Got response: {:?}", goose_response);
 
-        // Ok(response_to_http_response(response).await?)
-        let http_response = response_to_http_response(response).await?;
-        Ok(MatrixResponse { request: Some(goose_response.request), response: Some(http_response) })
+                // Goose integration end
+
+                Ok(response_to_http_response(response).await?)
+            },
+            Err(err) => {
+                // If required in the future, consider adding global error vector for access in scripts.
+                // Easier to maintain than propagating error results through all the various function
+                // signatures
+                println!("Error sending request: {:?}", err);
+
+                match *err {
+                    TransactionError::Reqwest(e) => Err(HttpError::Reqwest(e)),
+                    // For now, sending random error since there is no error mapping between types
+                    _ => Err(HttpError::NotClientRequest),
+
+                    // TransactionError::Url(_) => todo!(),
+                    // TransactionError::RequestFailed { raw_request } => todo!(),
+                    // TransactionError::RequestCanceled { source } => todo!(),
+                    // TransactionError::MetricsFailed { source } => todo!(),
+                    // TransactionError::LoggerFailed { source } => todo!(),
+                    // TransactionError::InvalidMethod { method } => todo!(),
+                }
+            },
+        }
+
     }
 }

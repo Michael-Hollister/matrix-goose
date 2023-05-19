@@ -72,8 +72,7 @@ impl RoomMember {
     pub async fn avatar(&self, format: MediaFormat) -> Result<Option<Vec<u8>>> {
         let Some(url) = self.avatar_url() else { return Ok(None) };
         let request = MediaRequest { source: MediaSource::Plain(url.to_owned()), format };
-        // Ok(Some(self.client.media().get_media_content(&request, true).await?))
-        Ok(Some(self.client.media().get_media_content(&request, true).await?.response.unwrap()))
+        Ok(Some(self.client.media().get_media_content(&request, true).await?))
     }
 
     /// Adds the room member to the current account data's ignore list

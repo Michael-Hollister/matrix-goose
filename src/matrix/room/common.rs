@@ -62,10 +62,10 @@ use matrix_sdk::{
 };
 use crate::matrix::{
     event_handler::{EventHandler, EventHandlerHandle, SyncEvent},
-    error::{Error, HttpError, Result},
+    error::{Error, HttpError, Result, HttpResult},
     media::{MediaFormat, MediaRequest},
     room::{Left, RoomMember, RoomState},
-    GooseMatrixClient, MatrixResponse, MatrixError,
+    GooseMatrixClient,
 };
 
 /// A struct containing methods that are common for Joined, Invited and Left
@@ -120,7 +120,6 @@ impl Common {
     ///
     /// Only invited and joined rooms can be left.
     pub(crate) async fn leave(&self) -> Result<Left> {
-    //pub(crate) async fn leave(&self) -> Result<MatrixResponse<leave_room::v3::Response>, MatrixError<Error>> {
         let request = leave_room::v3::Request::new(self.inner.room_id().to_owned());
         self.client.send(request, None).await?;
 
@@ -132,10 +131,8 @@ impl Common {
     ///
     /// Only invited and left rooms can be joined via this method.
     pub(crate) async fn join(&self) -> Result<Joined> {
-    //pub(crate) async fn join(&self) -> Result<MatrixResponse<join_room_by_id::v3::Response>, MatrixError<Error>> {
         let request = join_room_by_id::v3::Request::new(self.inner.room_id().to_owned());
-        // let response = self.client.send(request, None).await?;
-        let response = self.client.send(request, None).await?.response.unwrap();
+        let response = self.client.send(request, None).await?;
         let base_room = self.client.base_client().room_joined(&response.room_id).await?;
         Joined::new(&self.client, base_room).ok_or(Error::InconsistentState)
     }
@@ -184,11 +181,9 @@ impl Common {
     /// # })
     /// ```
     pub async fn avatar(&self, format: MediaFormat) -> Result<Option<Vec<u8>>> {
-    //pub async fn avatar(&self, format: MediaFormat) -> Result<MatrixResponse<Option<Vec<u8>>>, MatrixError<Error>> {
         let Some(url) = self.avatar_url() else { return Ok(None) };
         let request = MediaRequest { source: MediaSource::Plain(url.to_owned()), format };
-        // Ok(Some(self.client.media().get_media_content(&request, true).await?))
-        Ok(Some(self.client.media().get_media_content(&request, true).await?.response.unwrap()))
+        Ok(Some(self.client.media().get_media_content(&request, true).await?))
     }
 
     /// Sends a request to `/_matrix/client/r0/rooms/{room_id}/messages` and
@@ -220,11 +215,9 @@ impl Common {
     /// # });
     /// ```
     pub async fn messages(&self, options: MessagesOptions) -> Result<Messages> {
-    //pub async fn messages(&self, options: MessagesOptions<'_>) -> Result<MatrixResponse<Messages>, MatrixError<Error>> {
         let room_id = self.inner.room_id();
         let request = options.into_request(room_id);
-        // let http_response = self.client.send(request, None).await?;
-        let http_response = self.client.send(request, None).await?.response.unwrap();
+        let http_response = self.client.send(request, None).await?;
 
         #[allow(unused_mut)]
         let mut response = Messages {
@@ -301,8 +294,7 @@ impl Common {
     pub async fn event(&self, event_id: &EventId) -> Result<TimelineEvent> {
         let request =
             get_room_event::v3::Request::new(self.room_id().to_owned(), event_id.to_owned());
-        // let event = self.client.send(request, None).await?.event;
-        let event = self.client.send(request, None).await?.response.unwrap().event;
+        let event = self.client.send(request, None).await?.event;
 
         #[cfg(feature = "e2e-encryption")]
         if let Ok(AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomEncrypted(
@@ -337,8 +329,7 @@ impl Common {
             drop(map);
 
             let request = get_member_events::v3::Request::new(self.inner.room_id().to_owned());
-            // let response = self.client.send(request, None).await?;
-            let response = self.client.send(request, None).await?.response.unwrap();
+            let response = self.client.send(request, None).await?;
 
             let response =
                 self.client.base_client().receive_members(self.inner.room_id(), &response).await?;
@@ -379,20 +370,10 @@ impl Common {
             // let response = match self.client.send(request, None).await {
             let response = match self.client.send(request, None).await {
                 Ok(response) => {
-                    // Some(response.content.deserialize_as::<RoomEncryptionEventContent>()?)
-                    Some(response.response.unwrap().content.deserialize_as::<RoomEncryptionEventContent>()?)
+                    Some(response.content.deserialize_as::<RoomEncryptionEventContent>()?)
                 }
-                // Err(err) if err.client_api_error_kind() == Some(&ErrorKind::NotFound) => None,
-                // Err(err) => return Err(err.into()),
-                Err(err) => {
-                    let http_error = err.error.unwrap();
-                    if http_error.client_api_error_kind() == Some(&ErrorKind::NotFound) {
-                        None
-                    }
-                    else {
-                        return Err(http_error.into())
-                    }
-                }
+                Err(err) if err.client_api_error_kind() == Some(&ErrorKind::NotFound) => None,
+                Err(err) => return Err(err.into()),
             };
 
             let sync_lock = self.client.base_client().sync_lock().read().await;
@@ -782,8 +763,7 @@ impl Common {
         &self,
         tag: TagName,
         tag_info: TagInfo,
-    // ) -> HttpResult<create_tag::v3::Response> {
-    ) -> Result<MatrixResponse<create_tag::v3::Response>, MatrixError<HttpError>> {
+    ) -> HttpResult<create_tag::v3::Response> {
         let user_id = self.client.user_id().ok_or(HttpError::AuthenticationRequired)?;
         let request = create_tag::v3::Request::new(
             user_id.to_owned(),
@@ -800,8 +780,7 @@ impl Common {
     ///
     /// # Arguments
     /// * `tag` - The tag to remove.
-    // pub async fn remove_tag(&self, tag: TagName) -> HttpResult<delete_tag::v3::Response> {
-    pub async fn remove_tag(&self, tag: TagName) -> Result<MatrixResponse<delete_tag::v3::Response>, MatrixError<HttpError>> {
+    pub async fn remove_tag(&self, tag: TagName) -> HttpResult<delete_tag::v3::Response> {
         let user_id = self.client.user_id().ok_or(HttpError::AuthenticationRequired)?;
         let request = delete_tag::v3::Request::new(
             user_id.to_owned(),

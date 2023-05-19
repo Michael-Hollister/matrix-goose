@@ -30,8 +30,8 @@ use tracing::{info, instrument};
 // use crate::{config::RequestConfig, Result};
 use crate::matrix::{
     config::RequestConfig,
-    error::{Error, Result},
-    GooseMatrixClient, MatrixResponse, MatrixError,
+    error::Result,
+    GooseMatrixClient,
 };
 
 /// The login method.
@@ -173,8 +173,7 @@ impl LoginBuilder {
         skip_all,
         fields(method = self.login_method.tracing_desc()),
     )]
-    // pub async fn send(self) -> Result<login::v3::Response> {
-        pub async fn send(self) -> Result<MatrixResponse<login::v3::Response>, MatrixError<Error>> {
+    pub async fn send(self) -> Result<login::v3::Response> {
         let homeserver = self.client.homeserver().await;
         info!(homeserver = homeserver.as_str(), identifier = ?self.login_method.id(), "Logging in");
 
@@ -184,18 +183,15 @@ impl LoginBuilder {
             refresh_token: self.request_refresh_token,
         });
 
-        // let response = self.client.send(request, Some(RequestConfig::short_retry())).await?;
-        let response = self.client.send(request, Some(RequestConfig::short_retry())).await?.response.unwrap();
+        let response = self.client.send(request, Some(RequestConfig::short_retry())).await?;
         self.client.receive_login_response(&response).await?;
 
-        // Ok(response)
-        Ok(MatrixResponse { request: None, response: Some(response) })
+        Ok(response)
     }
 }
 
 impl IntoFuture for LoginBuilder {
-    // type Output = Result<login::v3::Response>;
-    type Output = Result<MatrixResponse<login::v3::Response>, MatrixError<Error>>;
+    type Output = Result<login::v3::Response>;
     // TODO: Use impl Trait once allowed in this position on stable
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output>>>;
 

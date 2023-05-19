@@ -93,8 +93,7 @@ impl Account {
         let user_id = self.client.user_id().ok_or(Error::AuthenticationRequired)?;
         let request = get_display_name::v3::Request::new(user_id.to_owned());
         let request_config = self.client.request_config().force_auth();
-        // let response = self.client.send(request, Some(request_config)).await?;
-        let response = self.client.send(request, Some(request_config)).await?.response.unwrap();
+        let response = self.client.send(request, Some(request_config)).await?;
         Ok(response.displayname)
     }
 
@@ -146,8 +145,7 @@ impl Account {
 
         let config = Some(RequestConfig::new().force_auth());
 
-        // let response = self.client.send(request, config).await?;
-        let response = self.client.send(request, config).await?.response.unwrap();
+        let response = self.client.send(request, config).await?;
         if let Some(url) = response.avatar_url.clone() {
             // If an avatar is found cache it.
             let _ = self
@@ -218,8 +216,7 @@ impl Account {
     pub async fn get_avatar(&self, format: MediaFormat) -> Result<Option<Vec<u8>>> {
         if let Some(url) = self.get_avatar_url().await? {
             let request = MediaRequest { source: MediaSource::Plain(url), format };
-            // Ok(Some(self.client.media().get_media_content(&request, true).await?))
-            Ok(Some(self.client.media().get_media_content(&request, true).await?.response.unwrap()))
+            Ok(Some(self.client.media().get_media_content(&request, true).await?))
         } else {
             Ok(None)
         }
@@ -253,8 +250,7 @@ impl Account {
     ///
     /// [`Media::upload()`]: crate::Media::upload
     pub async fn upload_avatar(&self, content_type: &Mime, data: Vec<u8>) -> Result<OwnedMxcUri> {
-        // let upload_response = self.client.media().upload(content_type, data).await?;
-        let upload_response = self.client.media().upload(content_type, data).await?.response.unwrap();
+        let upload_response = self.client.media().upload(content_type, data).await?;
         self.set_avatar_url(Some(&upload_response.content_uri)).await?;
         Ok(upload_response.content_uri)
     }
@@ -282,8 +278,7 @@ impl Account {
         let user_id = self.client.user_id().ok_or(Error::AuthenticationRequired)?;
         let request = get_profile::v3::Request::new(user_id.to_owned());
         let request_config = self.client.request_config().force_auth();
-        // Ok(self.client.send(request, Some(request_config)).await?)
-        Ok(self.client.send(request, Some(request_config)).await?.response.unwrap())
+        Ok(self.client.send(request, Some(request_config)).await?)
     }
 
     /// Change the password of the account.
@@ -336,8 +331,7 @@ impl Account {
         let request = assign!(change_password::v3::Request::new(new_password.to_owned()), {
             auth: auth_data,
         });
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Deactivate this account definitively.
@@ -387,8 +381,7 @@ impl Account {
             id_server: id_server.map(ToOwned::to_owned),
             auth: auth_data,
         });
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Get the registered [Third Party Identifiers][3pid] on the homeserver of
@@ -418,8 +411,7 @@ impl Account {
     /// [3pid]: https://spec.matrix.org/v1.2/appendices/#3pid-types
     pub async fn get_3pids(&self) -> Result<get_3pids::v3::Response> {
         let request = get_3pids::v3::Request::new();
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Request a token to validate an email address as a [Third Party
@@ -492,8 +484,7 @@ impl Account {
             email.to_owned(),
             send_attempt,
         );
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Request a token to validate a phone number as a [Third Party
@@ -571,8 +562,7 @@ impl Account {
             phone_number.to_owned(),
             send_attempt,
         );
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Add a [Third Party Identifier][3pid] on the homeserver for this
@@ -614,8 +604,7 @@ impl Account {
             assign!(add_3pid::v3::Request::new(client_secret.to_owned(), sid.to_owned()), {
                 auth: auth_data
             });
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Delete a [Third Party Identifier][3pid] from the homeserver for this
@@ -676,8 +665,7 @@ impl Account {
         let request = assign!(delete_3pid::v3::Request::new(medium, address.to_owned()), {
             id_server: id_server.map(ToOwned::to_owned),
         });
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Get the content of an account data event of statically-known type.
@@ -754,8 +742,7 @@ impl Account {
 
         let request = set_global_account_data::v3::Request::new(own_user.to_owned(), &content)?;
 
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Set the given raw account data event.
@@ -770,8 +757,7 @@ impl Account {
         let request =
             set_global_account_data::v3::Request::new_raw(own_user.to_owned(), event_type, content);
 
-        // Ok(self.client.send(request, None).await?)
-        Ok(self.client.send(request, None).await?.response.unwrap())
+        Ok(self.client.send(request, None).await?)
     }
 
     /// Marks the given room with `room_id` as "direct chat" with with any

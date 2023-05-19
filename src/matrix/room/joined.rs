@@ -53,9 +53,9 @@ use matrix_sdk::{
 };
 use crate::matrix::{
     attachment::AttachmentConfig,
-    error::{HttpError, Result},
+    error::{Result, HttpResult},
     room::{Common, RoomState},
-    GooseMatrixClient, MatrixResponse, MatrixError, Error,
+    GooseMatrixClient, Error,
 };
 
 #[cfg(feature = "image-proc")]
@@ -117,15 +117,13 @@ impl Joined {
     ///
     /// * `reason` - The reason for banning this user.
     #[instrument(skip_all)]
-    // pub async fn ban_user(&self, user_id: &UserId, reason: Option<&str>) -> Result<()> {
-    pub async fn ban_user(&self, user_id: &UserId, reason: Option<&str>) -> Result<MatrixResponse<ban_user::v3::Response>, MatrixError<Error>> {
+    pub async fn ban_user(&self, user_id: &UserId, reason: Option<&str>) -> Result<()> {
         let request = assign!(
             ban_user::v3::Request::new(self.inner.room_id().to_owned(), user_id.to_owned()),
             { reason: reason.map(ToOwned::to_owned) }
         );
-        // self.client.send(request, None).await?;
-        // Ok(())
-        Ok(self.client.send(request, None).await?)
+        self.client.send(request, None).await?;
+        Ok(())
     }
 
     /// Kick a user out of this room.
@@ -137,15 +135,13 @@ impl Joined {
     ///
     /// * `reason` - Optional reason why the room member is being kicked out.
     #[instrument(skip_all)]
-    // pub async fn kick_user(&self, user_id: &UserId, reason: Option<&str>) -> Result<()> {
-    pub async fn kick_user(&self, user_id: &UserId, reason: Option<&str>) -> Result<MatrixResponse<kick_user::v3::Response>, MatrixError<Error>> {
+    pub async fn kick_user(&self, user_id: &UserId, reason: Option<&str>) -> Result<()> {
         let request = assign!(
             kick_user::v3::Request::new(self.inner.room_id().to_owned(), user_id.to_owned()),
             { reason: reason.map(ToOwned::to_owned) }
         );
-        // self.client.send(request, None).await?;
-        // Ok(())
-        Ok(self.client.send(request, None).await?)
+        self.client.send(request, None).await?;
+        Ok(())
     }
 
     /// Invite the specified user by `UserId` to this room.
@@ -154,15 +150,13 @@ impl Joined {
     ///
     /// * `user_id` - The `UserId` of the user to invite to the room.
     #[instrument(skip_all)]
-    // pub async fn invite_user_by_id(&self, user_id: &UserId) -> Result<()> {
-    pub async fn invite_user_by_id(&self, user_id: &UserId) -> Result<MatrixResponse<invite_user::v3::Response>, MatrixError<Error>> {
+    pub async fn invite_user_by_id(&self, user_id: &UserId) -> Result<()> {
         let recipient = InvitationRecipient::UserId { user_id: user_id.to_owned() };
 
         let request = invite_user::v3::Request::new(self.inner.room_id().to_owned(), recipient);
-        // self.client.send(request, None).await?;
+        self.client.send(request, None).await?;
 
-        // Ok(())
-        Ok(self.client.send(request, None).await?)
+        Ok(())
     }
 
     /// Invite the specified user by third party id to this room.
@@ -171,14 +165,12 @@ impl Joined {
     ///
     /// * `invite_id` - A third party id of a user to invite to the room.
     #[instrument(skip_all)]
-    // pub async fn invite_user_by_3pid(&self, invite_id: Invite3pid) -> Result<()> {
-    pub async fn invite_user_by_3pid(&self, invite_id: Invite3pid) -> Result<MatrixResponse<invite_user::v3::Response>, MatrixError<Error>> {
+    pub async fn invite_user_by_3pid(&self, invite_id: Invite3pid) -> Result<()> {
         let recipient = InvitationRecipient::ThirdPartyId(invite_id);
         let request = invite_user::v3::Request::new(self.inner.room_id().to_owned(), recipient);
-        // self.client.send(request, None).await?;
+        self.client.send(request, None).await?;
 
-        // Ok(())
-        Ok(self.client.send(request, None).await?)
+        Ok(())
     }
 
     /// Activate typing notice for this room.
@@ -217,8 +209,7 @@ impl Joined {
     /// }
     /// # anyhow::Ok(()) });
     /// ```
-    // pub async fn typing_notice(&self, typing: bool) -> Result<()> {
-    pub async fn typing_notice(&self, typing: bool) -> Result<MatrixResponse<ruma::api::client::typing::create_typing_event::v3::Response>, MatrixError<Error>> {
+    pub async fn typing_notice(&self, typing: bool) -> Result<()> {
         // Only send a request to the homeserver if the old timeout has elapsed
         // or the typing notice changed state within the
         // TYPING_NOTICE_TIMEOUT
@@ -245,13 +236,11 @@ impl Joined {
             return Ok(self.send_typing_notice(typing).await?);
         }
 
-        // Ok(())
-        Ok(MatrixResponse { request: None, response: None })
+        Ok(())
     }
 
     #[instrument(name = "typing_notice", skip(self))]
-    // async fn send_typing_notice(&self, typing: bool) -> Result<()> {
-    async fn send_typing_notice(&self, typing: bool) -> Result<MatrixResponse<ruma::api::client::typing::create_typing_event::v3::Response>, MatrixError<Error>> {
+    async fn send_typing_notice(&self, typing: bool) -> Result<()> {
         let typing = if typing {
             self.client
                 .inner
@@ -269,10 +258,9 @@ impl Joined {
             typing,
         );
 
-        // self.client.send(request, None).await?;
+        self.client.send(request, None).await?;
 
-        // Ok(())
-        Ok(self.client.send(request, None).await?)
+        Ok(())
     }
 
     /// Send a request to set a single receipt.
@@ -294,8 +282,7 @@ impl Joined {
         receipt_type: ReceiptType,
         thread: ReceiptThread,
         event_id: OwnedEventId,
-    // ) -> Result<()> {
-    ) -> Result<MatrixResponse<create_receipt::v3::Response>, MatrixError<Error>> {
+    ) -> Result<()> {
         let mut request = create_receipt::v3::Request::new(
             self.inner.room_id().to_owned(),
             receipt_type,
@@ -303,9 +290,8 @@ impl Joined {
         );
         request.thread = thread;
 
-        // self.client.send(request, None).await?;
-        // Ok(())
-        Ok(self.client.send(request, None).await?)
+        self.client.send(request, None).await?;
+        Ok(())
     }
 
     /// Send a request to set multiple receipts at once.
@@ -316,11 +302,9 @@ impl Joined {
     ///
     /// If `receipts` is empty, this is a no-op.
     #[instrument(skip_all)]
-    // pub async fn send_multiple_receipts(&self, receipts: Receipts) -> Result<()> {
-    pub async fn send_multiple_receipts(&self, receipts: Receipts) -> Result<MatrixResponse<set_read_marker::v3::Response>, MatrixError<Error>> {
+    pub async fn send_multiple_receipts(&self, receipts: Receipts) -> Result<()> {
         if receipts.is_empty() {
-            // return Ok(());
-            return Ok(MatrixResponse { request: None, response: None });
+            return Ok(());
         }
 
         let Receipts { fully_read, read_receipt, private_read_receipt } = receipts;
@@ -330,9 +314,8 @@ impl Joined {
             private_read_receipt,
         });
 
-        // self.client.send(request, None).await?;
-        // Ok(())
-        Ok(self.client.send(request, None).await?)
+        self.client.send(request, None).await?;
+        Ok(())
     }
 
     /// Enable End-to-end encryption in this room.
@@ -367,8 +350,7 @@ impl Joined {
     /// # anyhow::Ok(()) });
     /// ```
     #[instrument(skip_all)]
-    // pub async fn enable_encryption(&self) -> Result<()> {
-    pub async fn enable_encryption(&self) -> Result<MatrixResponse<()>, MatrixError<Error>> {
+    pub async fn enable_encryption(&self) -> Result<()> {
         use ruma::{
             events::room::encryption::RoomEncryptionEventContent, EventEncryptionAlgorithm,
         };
@@ -385,8 +367,7 @@ impl Joined {
             self.client.inner.sync_beat.listen().wait_timeout(SYNC_WAIT_TIME);
         }
 
-        // Ok(())
-        Ok(MatrixResponse { request: None, response: None })
+        Ok(())
     }
 
     /// Share a room key with users in the given room.
@@ -563,8 +544,7 @@ impl Joined {
         &self,
         content: impl MessageLikeEventContent,
         txn_id: Option<&TransactionId>,
-    // ) -> Result<send_message_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_message_event::v3::Response>, MatrixError<Error>> {
+    ) -> Result<send_message_event::v3::Response> {
         let event_type = content.event_type().to_string();
         let content = serde_json::to_value(&content)?;
 
@@ -632,8 +612,7 @@ impl Joined {
         content: Value,
         event_type: &str,
         txn_id: Option<&TransactionId>,
-    // ) -> Result<send_message_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_message_event::v3::Response>, MatrixError<Error>> {
+    ) -> Result<send_message_event::v3::Response> {
         let txn_id: OwnedTransactionId = txn_id.map_or_else(TransactionId::new, ToOwned::to_owned);
 
         #[cfg(not(feature = "e2e-encryption"))]
@@ -751,8 +730,7 @@ impl Joined {
         content_type: &Mime,
         data: Vec<u8>,
         config: AttachmentConfig,
-    // ) -> Result<send_message_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_message_event::v3::Response>, MatrixError<Error>> {
+    ) -> Result<send_message_event::v3::Response> {
         if config.thumbnail.is_some() {
             self.prepare_and_send_attachment(body, content_type, data, config).await
         } else {
@@ -843,8 +821,7 @@ impl Joined {
         content_type: &Mime,
         data: Vec<u8>,
         config: AttachmentConfig,
-    // ) -> Result<send_message_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_message_event::v3::Response>, MatrixError<Error>> {
+    ) -> Result<send_message_event::v3::Response> {
         #[cfg(feature = "e2e-encryption")]
         let content = if self.is_encrypted().await? {
             self.client
@@ -868,8 +845,7 @@ impl Joined {
             .client
             .media()
             .prepare_attachment_message(body, content_type, data, config.info, config.thumbnail)
-            // .await?;
-            .await?.response.unwrap();
+            .await?;
 
         self.send(RoomMessageEventContent::new(content), config.txn_id.as_deref()).await
     }
@@ -885,8 +861,7 @@ impl Joined {
     pub async fn update_power_levels(
         &self,
         updates: Vec<(&UserId, Int)>,
-    // ) -> Result<send_state_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>> {
+    ) -> Result<send_state_event::v3::Response> {
         let raw_pl_event = self
             .get_state_event_static::<RoomPowerLevelsEventContent>()
             .await?
@@ -906,14 +881,12 @@ impl Joined {
     }
 
     /// Sets the name of this room.
-    // pub async fn set_name(&self, name: Option<String>) -> Result<send_state_event::v3::Response> {
-    pub async fn set_name(&self, name: Option<String>) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>> {
+    pub async fn set_name(&self, name: Option<String>) -> Result<send_state_event::v3::Response> {
         self.send_state_event(RoomNameEventContent::new(name)).await
     }
 
     /// Sets a new topic for this room.
-    // pub async fn set_room_topic(&self, topic: &str) -> Result<send_state_event::v3::Response> {
-    pub async fn set_room_topic(&self, topic: &str) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>> {
+    pub async fn set_room_topic(&self, topic: &str) -> Result<send_state_event::v3::Response> {
         let topic_event = RoomTopicEventContent::new(topic.into());
 
         self.send_state_event(topic_event).await
@@ -928,8 +901,7 @@ impl Joined {
         &self,
         url: &MxcUri,
         info: Option<ImageInfo>,
-    // ) -> Result<send_state_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>> {
+    ) -> Result<send_state_event::v3::Response> {
         let mut room_avatar_event = RoomAvatarEventContent::new();
         room_avatar_event.url = Some(url.to_owned());
         room_avatar_event.info = info.map(Box::new);
@@ -938,8 +910,7 @@ impl Joined {
     }
 
     /// Removes the avatar from the room
-    // pub async fn remove_avatar(&self) -> Result<send_state_event::v3::Response> {
-    pub async fn remove_avatar(&self) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>> {
+    pub async fn remove_avatar(&self) -> Result<send_state_event::v3::Response> {
         let room_avatar_event = RoomAvatarEventContent::new();
 
         self.send_state_event(room_avatar_event).await
@@ -957,10 +928,8 @@ impl Joined {
         mime: &Mime,
         data: Vec<u8>,
         info: Option<ImageInfo>,
-    // ) -> Result<send_state_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>> {
-        // let upload_response = self.client.media().upload(mime, data).await?;
-        let upload_response = self.client.media().upload(mime, data).await?.response.unwrap();
+    ) -> Result<send_state_event::v3::Response> {
+        let upload_response = self.client.media().upload(mime, data).await?;
         let mut info = info.unwrap_or_else(ImageInfo::new);
         info.blurhash = upload_response.blurhash;
         info.mimetype = Some(mime.to_string());
@@ -1015,8 +984,7 @@ impl Joined {
     pub async fn send_state_event(
         &self,
         content: impl StateEventContent<StateKey = EmptyStateKey>,
-    // ) -> Result<send_state_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>> {
+    ) -> Result<send_state_event::v3::Response> {
         self.send_state_event_for_key(&EmptyStateKey, content).await
     }
 
@@ -1064,8 +1032,7 @@ impl Joined {
         &self,
         state_key: &K,
         content: C,
-    // ) -> Result<send_state_event::v3::Response>
-    ) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>>
+    ) -> Result<send_state_event::v3::Response>
     where
         C: StateEventContent,
         C::StateKey: Borrow<K>,
@@ -1119,8 +1086,7 @@ impl Joined {
         content: Value,
         event_type: &str,
         state_key: &str,
-    // ) -> Result<send_state_event::v3::Response> {
-    ) -> Result<MatrixResponse<send_state_event::v3::Response>, MatrixError<Error>> {
+    ) -> Result<send_state_event::v3::Response> {
         let content = Raw::new(&content)?.cast();
         let request = send_state_event::v3::Request::new_raw(
             self.inner.room_id().to_owned(),
@@ -1171,8 +1137,7 @@ impl Joined {
         event_id: &EventId,
         reason: Option<&str>,
         txn_id: Option<OwnedTransactionId>,
-    // ) -> HttpResult<redact_event::v3::Response> {
-    ) -> Result<MatrixResponse<redact_event::v3::Response>, MatrixError<HttpError>> {
+    ) -> HttpResult<redact_event::v3::Response> {
         let txn_id = txn_id.unwrap_or_else(TransactionId::new);
         let request = assign!(
             redact_event::v3::Request::new(self.inner.room_id().to_owned(), event_id.to_owned(), txn_id),
