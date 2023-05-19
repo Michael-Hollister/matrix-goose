@@ -23,7 +23,6 @@ edition = "2021"
 # [workspace.dependencies]
 [dependencies]
 csv = "^1.2"
-# genawaiter = "^0.99"
 goose = "^0.17"
 goose-eggs = "^0.5.1"
 # tokio = { version = "^1.27.0", features = ["full"] }

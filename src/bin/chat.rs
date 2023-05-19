@@ -2,13 +2,9 @@ use goose::prelude::*;
 use rand::Rng;
 use rand::seq::SliceRandom;
 
-
-// use std::{future::Future, pin::Pin};
-
-// use std::thread;
 use tokio::{
     task::JoinHandle,
-    time::{sleep, Duration},
+    time::Duration,
     sync::RwLock,
 };
 use std::{
@@ -17,33 +13,22 @@ use std::{
 };
 
 use rand_distr::{Exp, LogNormal, Distribution};
-use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
 
 // use matrix_sdk::Client;
 use matrix_sdk::ruma::{
-    // api::client::{
-    //     account::register::{v3::Request as RegistrationRequest, RegistrationKind},
-    //     uiaa,
-    // },
     TransactionId,
     OwnedRoomId,
-
-    // DeviceId,
-    // events::room::message::OriginalSyncRoomMessageEvent,
 };
 
+use matrix_goose::{
+    matrix::{
+        GooseMatrixClient,
+        GOOSE_USERS,
 
-use url::Url;
-
-// mod matrix;
-use matrix_goose::matrix::{
-    GooseMatrixClient,
-    MatrixResponse,
-    MatrixError,
-    GOOSE_USERS, //GOOSE_USERS_READER,
-
-    config::SyncSettings,
+        config::SyncSettings,
+    },
+    task_sleep,
 };
 
 
@@ -66,10 +51,7 @@ static USERS_READER: &Vec<User> = unsafe { &USERS };
 // threads (sync_forever and logic thread) depending on the current state of the tokio
 // runtime task scheduler.
 static mut CLIENTS: Lazy<HashMap<usize, Arc<GooseMatrixClient>>> = Lazy::new(|| { HashMap::new() });
-
-lazy_static! {
-    static ref CANCELED: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
-}
+static SHUTDOWN: Lazy<RwLock<bool>> = Lazy::new(|| { RwLock::new(false) });
 
 const lorem_ipsum_text: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
@@ -104,7 +86,7 @@ async fn setup(_user: &mut GooseUser) -> TransactionResult {
     Ok(())
 }
 
-async fn teardown(user: &mut GooseUser) -> TransactionResult {
+async fn teardown(_user: &mut GooseUser) -> TransactionResult {
     println!("Tearing down loadtest...");
 
     Ok(())
@@ -119,7 +101,7 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
         let static_client_ref = Arc::new(GooseMatrixClient::new(host, thread_index).await.unwrap());
         CLIENTS.insert(thread_index, static_client_ref);
 
-        let mut client = Arc::clone(&CLIENTS[&thread_index]);
+        let client = Arc::clone(&CLIENTS[&thread_index]);
         let csv_user = &USERS_READER[thread_index];
         let username = csv_user.username.to_owned();
         let password = csv_user.password.to_owned();
@@ -130,9 +112,29 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
 
                 // Spawn sync_forever task
                 let handle = tokio::spawn(async move {
-                    println!("Spawning sync_forever task");
-                    let _ = client.sync(SyncSettings::default()).await;
-                    println!("[{}] Warning sync_forever future returned early", username);
+                    // println!("Spawning sync_forever task");
+                    let mut sync_settings = SyncSettings::default();
+
+                    loop {
+                        // We cannot use the SDK's `sync` forever method because we can
+                        // get segmentation faults if we attempt to abort the task while
+                        // having an open TCP connection
+                        match client.sync_once(sync_settings.clone()).await {
+                            Ok(response) => {
+                                sync_settings = sync_settings.token(response.next_batch.clone());
+                            },
+                            // Sync timeout warnings already gets outputted to console and report
+                            Err(_) => {},
+                            // Err(err) => { println!("[{}] Sync error: {}", username, err) },
+                        }
+
+                        // Drop lock after checking shutdown status
+                        {
+                            if *SHUTDOWN.read().await {
+                                break;
+                            }
+                        }
+                    }
                 });
 
                 user.set_session_data(ClientData { room_id: None, room_tokens: HashMap::new(), sync_forever_handle: handle });
@@ -141,36 +143,30 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
             },
             Err(error) => {
                 println!("[{}] Error logging in: {:?}", username, error);
-                Err(error.goose_error.unwrap())
+                Ok(())
             }
         }
     }
 }
 
 async fn on_stop(user: &mut GooseUser) -> TransactionResult {
-    let client_data = user.get_session_data::<ClientData>().unwrap();
-    client_data.sync_forever_handle.abort();
+    if let Some(client_data) = user.get_session_data::<ClientData>() {
+        // Drop lock after updating shutdown status
+        {
+            if !*SHUTDOWN.read().await {
+                *SHUTDOWN.write().await = true;
+            }
+        }
+
+        // We cannot directly abort sync_forever task since segmentation faults could
+        // occur if task is aborted having an open TCP connection
+        while !client_data.sync_forever_handle.is_finished() {
+            // Wait until timeout expires or sync response is received
+            task_sleep(1.0).await;
+        }
+    }
 
     Ok(())
-}
-
-// Sleep handler that allows for graceful termination so reports can be generated
-async fn client_sleep(delay: f64) {
-    let mut count = delay;
-
-    // Task sleeping hangs goose termination for long sleep durations, so its needed
-    // frequently poll if sleep should be canceled.
-    while (count > 1.0) && !*CANCELED.read().await {
-        tokio::select! {
-            _ = sleep(Duration::from_secs_f64(1.0)) => { count -= 1.0; },
-            _ = tokio::signal::ctrl_c() => { *CANCELED.write().await = true; },
-        };
-    }
-
-    // Finish up remaining sleep time
-    if count.fract() > 0.0 {
-        sleep(Duration::from_secs_f64(count.fract())).await;
-    }
 }
 
 async fn do_nothing(_user: &mut GooseUser) -> TransactionResult { Ok(()) }
@@ -202,7 +198,7 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
     // Sleep while we pretend the user is banging on the keyboard
     let exp = Exp::new(1.0 / 5.0).unwrap();
     let delay = exp.sample(&mut rand::thread_rng());
-    client_sleep(delay).await;
+    task_sleep(delay).await;
 
     let words: Vec<&str> = lorem_ipsum_text.split(" ").collect();
     let log_normal = LogNormal::new(1.0, 1.0).unwrap();
@@ -299,7 +295,7 @@ async fn go_afk(user: &mut GooseUser) -> TransactionResult {
     // Generate large(ish) random away time.
     let exp = Exp::new(1.0 / 600.0).unwrap(); // Expected value = 10 minutes
     let delay = exp.sample(&mut rand::thread_rng());
-    client_sleep(delay).await;
+    task_sleep(delay).await;
 
     Ok(())
 }
