@@ -4,7 +4,7 @@ use rand::seq::SliceRandom;
 
 use tokio::{
     task::JoinHandle,
-    time::Duration,
+    time::{Duration, Instant},
     sync::RwLock,
 };
 use std::{
@@ -14,6 +14,8 @@ use std::{
 
 use rand_distr::{Exp, LogNormal, Distribution};
 use once_cell::sync::Lazy;
+use weighted_rand::builder::*;
+// use duration_string::DurationString;
 
 // use matrix_sdk::Client;
 use matrix_sdk::ruma::{
@@ -28,20 +30,49 @@ use matrix_goose::{
 
         config::SyncSettings,
     },
-    task_sleep,
+    task_sleep, CANCELED,
 };
 
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 struct User {
     username: String,
     password: String,
 }
 
+#[derive(Debug)]
 struct ClientData {
     room_id: Option<OwnedRoomId>,
     room_tokens: HashMap<OwnedRoomId, String>,
     sync_forever_handle: JoinHandle<()>,
+}
+
+// #[derive(Debug, Clone)]
+enum TaskIndex {
+    DoNothing,
+    SendText,
+    LookAtRoom,
+    PaginateRoom,
+    GoAFK,
+    ChangeDisplayName,
+    SendImage,
+    SendReaction,
+}
+
+impl From<usize> for TaskIndex {
+    fn from(value: usize) -> Self {
+        match value {
+            0 => Self::DoNothing,
+            1 => Self::SendText,
+            2 => Self::LookAtRoom,
+            3 => Self::PaginateRoom,
+            4 => Self::GoAFK,
+            5 => Self::ChangeDisplayName,
+            6 => Self::SendImage,
+            7 => Self::SendReaction,
+            _ => panic!("Invalid enum index"),
+        }
+    }
 }
 
 static mut USERS: Vec<User> = Vec::new();
@@ -51,7 +82,7 @@ static USERS_READER: &Vec<User> = unsafe { &USERS };
 // threads (sync_forever and logic thread) depending on the current state of the tokio
 // runtime task scheduler.
 static mut CLIENTS: Lazy<HashMap<usize, Arc<GooseMatrixClient>>> = Lazy::new(|| { HashMap::new() });
-static SHUTDOWN: Lazy<RwLock<bool>> = Lazy::new(|| { RwLock::new(false) });
+static ATTACK_START: Lazy<Instant> = Lazy::new(|| { Instant::now() });
 
 const lorem_ipsum_text: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
@@ -93,16 +124,16 @@ async fn teardown(_user: &mut GooseUser) -> TransactionResult {
 }
 
 async fn on_start(user: &mut GooseUser) -> TransactionResult {
-    let thread_index = user.weighted_users_index;
+    let user_index = user.weighted_users_index;
     unsafe {
         let host = user.base_url.to_owned();
         GOOSE_USERS.push(user);
 
-        let static_client_ref = Arc::new(GooseMatrixClient::new(host, thread_index).await.unwrap());
-        CLIENTS.insert(thread_index, static_client_ref);
+        let static_client_ref = Arc::new(GooseMatrixClient::new(host, user_index).await.unwrap());
+        CLIENTS.insert(user_index, static_client_ref);
 
-        let client = Arc::clone(&CLIENTS[&thread_index]);
-        let csv_user = &USERS_READER[thread_index];
+        let client = Arc::clone(&CLIENTS[&user_index]);
+        let csv_user = &USERS_READER[user_index];
         let username = csv_user.username.to_owned();
         let password = csv_user.password.to_owned();
 
@@ -128,9 +159,9 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
                             // Err(err) => { println!("[{}] Sync error: {}", username, err) },
                         }
 
-                        // Drop lock after checking shutdown status
+                        // Drop lock after checking canceled status
                         {
-                            if *SHUTDOWN.read().await {
+                            if *CANCELED.read().await {
                                 break;
                             }
                         }
@@ -150,11 +181,13 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
 }
 
 async fn on_stop(user: &mut GooseUser) -> TransactionResult {
+    // println!("Stopping goose user {}...", user.weighted_users_index);
+
     if let Some(client_data) = user.get_session_data::<ClientData>() {
-        // Drop lock after updating shutdown status
+        // Drop lock after updating canceled status
         {
-            if !*SHUTDOWN.read().await {
-                *SHUTDOWN.write().await = true;
+            if !*CANCELED.read().await {
+                *CANCELED.write().await = true;
             }
         }
 
@@ -162,18 +195,77 @@ async fn on_stop(user: &mut GooseUser) -> TransactionResult {
         // occur if task is aborted having an open TCP connection
         while !client_data.sync_forever_handle.is_finished() {
             // Wait until timeout expires or sync response is received
-            task_sleep(1.0).await;
+            task_sleep(1.0, false).await;
         }
     }
 
     Ok(())
 }
 
-async fn do_nothing(_user: &mut GooseUser) -> TransactionResult { Ok(()) }
+// The Goose task scheduler is insufficient for our use-case:
+//   1. Transaction ordering for a given scenario is deterministic and not random
+//   2. Scenario scheduling can be set to 'random', but Goose allocates a set of users
+//      only at start to a given scenario that ALWAYS runs the transactions within its
+//      own scenario for the remainder of the program.
+// Thus to replicate similar behavior to Locust, we have to create our own scheduler to
+// achieve a weighted, non-deterministic selection of user actions
+async fn task_scheduler(user: &mut GooseUser) -> TransactionResult {
+    // let runtime: Duration = DurationString::from_string(user.config.run_time.to_owned()).unwrap().into();
+    // Goose seems to internally convert the '--run-time' time string to seconds
+    let runtime = Duration::from_secs(user.config.run_time.parse::<u64>().unwrap());
+
+    // Drop lock after checking canceled status
+    {
+        // Goose seems to re-run the scheduler transaction upon the
+        // GooseAttack phase decrease...
+        if *CANCELED.read().await || ATTACK_START.elapsed() > runtime {
+            return Ok(());
+        }
+    }
+
+    // Scheduler setup
+    let index_weights = [11, 3, 4, 1, 1, 1, 0, 0];
+    let task_gen = WalkerTableBuilder::new(&index_weights).build();
+
+    // Task scheduler loop
+    loop {
+        // Drop lock after checking canceled status
+        {
+            // Goose is unable to terminate users upon switching to the decrease phase
+            if *CANCELED.read().await || ATTACK_START.elapsed() > runtime {
+                break;
+            }
+        }
+
+        let index = task_gen.next_rng(&mut rand::thread_rng());
+        match TaskIndex::from(index) {
+            TaskIndex::DoNothing => { let _ = do_nothing(user).await; },
+            TaskIndex::SendText => { let _ = send_text(user).await; },
+            TaskIndex::LookAtRoom => { let _ = look_at_room(user).await; },
+            TaskIndex::PaginateRoom => { let _ = paginate_room(user).await; },
+            TaskIndex::GoAFK => { let _ = go_afk(user).await; },
+            TaskIndex::ChangeDisplayName => { let _ = change_displayname(user).await; },
+            TaskIndex::SendImage => { let _ = send_image(user).await; },
+            TaskIndex::SendReaction => { let _ = send_reaction(user).await; },
+        }
+
+        task_sleep(0.1, true).await;
+    }
+
+    Ok(())
+}
+
+async fn do_nothing(_user: &mut GooseUser) -> TransactionResult {
+    let exp = Exp::new(0.1).unwrap();
+    let delay = exp.sample(&mut rand::thread_rng());
+    task_sleep(delay, true).await;
+
+    Ok(())
+}
 
 async fn send_text(user: &mut GooseUser) -> TransactionResult {
-    let thread_index = user.weighted_users_index;
-    let client = get_client(thread_index).await;
+    let user_index = user.weighted_users_index;
+    let client = get_client(user_index).await;
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::typing::create_typing_event::v3::Request as TypingRequest;
     use ruma::api::client::typing::create_typing_event::v3::Typing as Typing;
@@ -185,7 +277,7 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
     let room_id;
 
     match user.get_session_data::<ClientData>().unwrap().room_id.to_owned() {
-        Some(id) => room_id = id.to_owned(),
+        Some(id) => {room_id = id.to_owned(); },
         None => return Ok(()),
     }
 
@@ -198,7 +290,7 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
     // Sleep while we pretend the user is banging on the keyboard
     let exp = Exp::new(1.0 / 5.0).unwrap();
     let delay = exp.sample(&mut rand::thread_rng());
-    task_sleep(delay).await;
+    task_sleep(delay, true).await;
 
     let words: Vec<&str> = lorem_ipsum_text.split(" ").collect();
     let log_normal = LogNormal::new(1.0, 1.0).unwrap();
@@ -216,8 +308,12 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
 }
 
 async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
-    let thread_index = user.weighted_users_index;
-    let client = get_client(thread_index).await;
+    let user_index = user.weighted_users_index;
+    let client = get_client(user_index).await;
+    let username = client.user_id().unwrap().localpart();
+    use ruma::api::client::message::send_message_event::v3::Request as MessageRequest;
+    use ruma::events::room::message::RoomMessageEventContent as RoomMessage;
+
 
     // room_id = self.get_random_roomid()
     // if room_id is None:
@@ -244,8 +340,8 @@ async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
 // #       and message thumbnails every time we paginate, just like a
 // #       real client would do as the user scrolls the timeline.
 async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
-    let thread_index = user.weighted_users_index;
-    let client = get_client(thread_index).await;
+    let user_index = user.weighted_users_index;
+    let client = get_client(user_index).await;
     let username = client.user_id().unwrap().localpart();
 
     let room_id;
@@ -256,17 +352,10 @@ async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
 
     let client_data = user.get_session_data_mut::<ClientData>().unwrap();
     client_data.room_id = Some(room_id.to_owned());
-    // match user.get_session_data_mut::<ClientData>() {
-    //     Some(client_data) => client_data.room_id = room_id.to_owned(),
-    //     None => user.set_session_data(
-    //         ClientData { room_id: room_id.to_owned(), room_tokens: HashMap::new() }),
-    // }
 
     // Note: consider swapping this with the client API call instead? no need to keep track of tokens
-
     use ruma::api::client::message::get_message_events::v3::Request as Request;
     use ruma::api::Direction as Direction;
-
 
     let mut request = Request::new(room_id.to_owned(), Direction::Backward);
     if let Some(token) = client_data.room_tokens.get(&room_id) {
@@ -275,9 +364,10 @@ async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
 
     match client.send(request, None).await {
         Ok(response) => {
-            // if let Some(token) = response.response.unwrap().end {
-            //     client_data.room_tokens.insert(room_id, token);
-            // }
+            if let Some(token) = response.end {
+                // println!("[{}] Setting room token - Old: {:?}, New: {}", username, client_data.room_tokens.get(&room_id.to_owned()), token);
+                client_data.room_tokens.insert(room_id, token);
+            }
         },
         Err(_) => println!("[{}] failed /messages failed for room [{}]", username, room_id),
     }
@@ -286,23 +376,23 @@ async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
 }
 
 async fn go_afk(user: &mut GooseUser) -> TransactionResult {
-    let thread_index = user.weighted_users_index;
+    let user_index = user.weighted_users_index;
 
-    let csv_user = &USERS_READER[thread_index];
+    let csv_user = &USERS_READER[user_index];
     let username = &csv_user.username.to_owned();
     println!("[{}] going away from keyboard", username);
 
     // Generate large(ish) random away time.
     let exp = Exp::new(1.0 / 600.0).unwrap(); // Expected value = 10 minutes
     let delay = exp.sample(&mut rand::thread_rng());
-    task_sleep(delay).await;
+    task_sleep(delay, true).await;
 
     Ok(())
 }
 
 async fn change_displayname(user: &mut GooseUser) -> TransactionResult {
-    let thread_index = user.weighted_users_index;
-    let client = get_client(thread_index).await;
+    let user_index = user.weighted_users_index;
+    let client = get_client(user_index).await;
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::profile::set_display_name::v3::Request as Request;
 
@@ -328,8 +418,8 @@ async fn send_image(user: &mut GooseUser) -> TransactionResult {
 }
 
 async fn send_reaction(user: &mut GooseUser) -> TransactionResult {
-    let thread_index = user.weighted_users_index;
-    let client = get_client(thread_index).await;
+    let user_index = user.weighted_users_index;
+    let client = get_client(user_index).await;
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::message::send_message_event::v3::Request as MessageRequest;
     use ruma::events::room::message::RoomMessageEventContent as RoomMessage;
@@ -392,51 +482,22 @@ async fn main() -> Result<(), GooseError> {
 
     // Run test
     GooseAttack::initialize()?
-        .test_start(transaction!(setup))
-        .register_scenario(scenario!("Default")
-            .register_transaction(transaction!(on_start)
-                .set_on_start()
-                .set_name("On start"))
-            .register_transaction(transaction!(do_nothing)
-                .set_name("Do nothing")
-                .set_sequence(1)
-                .set_weight(11)?)
-            .register_transaction(transaction!(send_text)
-                .set_name("Send text")
-                .set_sequence(1)
-                // .set_weight(1)?)
-                .set_weight(3)?)
-            .register_transaction(transaction!(look_at_room)
-                .set_name("Look at room")
-                .set_sequence(1)
-                .set_weight(4)?)
-            .register_transaction(transaction!(paginate_room)
-                .set_name("Paginate room")
-                .set_sequence(1)
-                .set_weight(1)?)
-            .register_transaction(transaction!(go_afk)
-                .set_name("Go AFK")
-                .set_sequence(1)
-                .set_weight(1)?)
-            .register_transaction(transaction!(change_displayname)
-                .set_name("Change displayname")
-                .set_sequence(1)
-                .set_weight(1)?)
-            .register_transaction(transaction!(on_stop)
-                .set_on_stop()
-                .set_name("On stop"))
-            .set_wait_time(Duration::ZERO, Duration::ZERO)?
-        )
-        // .register_scenario(scenario!("ChatInARoom")
-        //     .register_transaction(transaction!(send_text))
-        //     .register_transaction(transaction!(send_image))
-        //     .register_transaction(transaction!(send_reaction))
-        //     .set_wait_time(Duration::ZERO, Duration::ZERO)?
-        // )
-        .test_stop(transaction!(teardown))
-        .set_default(GooseDefault::HatchRate, "32")?
-        .execute()
-        .await?;
+    .test_start(transaction!(setup))
+    .register_scenario(scenario!("Default")
+        .register_transaction(transaction!(on_start)
+            .set_on_start()
+            .set_name("On start"))
+        .register_transaction(transaction!(task_scheduler)
+            .set_name("Scheduler"))
+        .register_transaction(transaction!(on_stop)
+            .set_on_stop()
+            .set_name("On stop"))
+        .set_wait_time(Duration::from_millis(100), Duration::from_millis(200))?
+    )
+    .test_stop(transaction!(teardown))
+    .set_default(GooseDefault::HatchRate, "32")?
+    .execute()
+    .await?;
 
     Ok(())
 }

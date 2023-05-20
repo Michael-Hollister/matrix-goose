@@ -1620,6 +1620,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "weighted_rand",
 ]
 
 [[package]]
@@ -3410,6 +3411,16 @@ checksum = "e33b99f4b23ba3eec1a53ac264e35a755f00e966e0065077d6027c0f575b0b97"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "weighted_rand"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa38fbbf4930b37000e7450bc0aaa634bc6515d34a4e0910e2a078fb951efbe"
+dependencies = [
+ "rand 0.8.5",
+ "serde",
 ]
 
 [[package]]
