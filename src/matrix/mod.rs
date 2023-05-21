@@ -163,10 +163,12 @@ pub struct UnknownToken {
 #[derive(Clone)]
 // pub struct Client {
 pub struct GooseMatrixClient {
-    pub(crate) inner: Arc<ClientInner>,
+    // pub(crate) inner: Arc<ClientInner>,
+    pub inner: Arc<ClientInner>,
 }
 
-pub(crate) struct ClientInner {
+// pub(crate) struct ClientInner {
+pub struct ClientInner {
     /// The URL of the homeserver to connect to.
     homeserver: RwLock<Url>,
     /// The OIDC Provider that is trusted by the homeserver.
@@ -222,7 +224,7 @@ pub(crate) struct ClientInner {
     /// reference ins not directly stored in this struct because there are too
     /// many lifetime annotations to maintain and propagates across many types,
     /// while additionally also involves some code re-writing as well.
-    goose_user_index: usize,
+    pub goose_user_index: usize,
 }
 
 pub static mut GOOSE_USERS: Vec<*mut GooseUser> = Vec::new();

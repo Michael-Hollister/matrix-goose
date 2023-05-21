@@ -521,8 +521,19 @@ impl HttpSend for reqwest::Client {
                 None => name = first.to_owned() + "_",
             }
         }
+        if let Some(index) = name.find("$") {
+            let (first, last) = name.split_at(index);
+            match last.find("/") {
+                Some(index) => name = first.to_owned() + "_" + &last[index .. last.len()],
+                None => name = first.to_owned() + "_",
+            }
+        }
         if let Some(index) = name.find("m.room.message/") {
             name.truncate(index + "m.room.message/".len());
+            name.push('_');
+        }
+        if let Some(index) = name.find("m.reaction/") {
+            name.truncate(index + "m.reaction/".len());
             name.push('_');
         }
 

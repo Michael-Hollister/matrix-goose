@@ -2,6 +2,7 @@ use goose::prelude::*;
 use rand::Rng;
 use rand::seq::SliceRandom;
 
+use ruma_common::serde::Raw;
 use tokio::{
     task::JoinHandle,
     time::{Duration, Instant},
@@ -16,11 +17,17 @@ use rand_distr::{Exp, LogNormal, Distribution};
 use once_cell::sync::Lazy;
 use weighted_rand::builder::*;
 // use duration_string::DurationString;
+use serde_json::{json, value::to_raw_value};
 
 // use matrix_sdk::Client;
-use matrix_sdk::ruma::{
-    TransactionId,
-    OwnedRoomId,
+use matrix_sdk::{
+    ruma::{
+        // events::room::message::SyncRoomMessageEvent,
+        events::room::message::OriginalSyncRoomMessageEvent,
+        TransactionId,
+        OwnedRoomId,
+        OwnedUserId,
+    },
 };
 
 use matrix_goose::{
@@ -29,6 +36,7 @@ use matrix_goose::{
         GOOSE_USERS,
 
         config::SyncSettings,
+        room::Room,
     },
     task_sleep, CANCELED,
 };
@@ -40,10 +48,12 @@ struct User {
     password: String,
 }
 
+// TODO: Switch to using the client store instead of user session data
 #[derive(Debug)]
 struct ClientData {
     room_id: Option<OwnedRoomId>,
     room_tokens: HashMap<OwnedRoomId, String>,
+    room_messages: HashMap<OwnedRoomId, Vec<OriginalSyncRoomMessageEvent>>,
     sync_forever_handle: JoinHandle<()>,
 }
 
@@ -140,6 +150,7 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
         match client.login_username(&username, &password).send().await {
             Ok(_) => {
                 println!("[{}] Logged in successfully", username);
+                client.add_event_handler(on_room_message);
 
                 // Spawn sync_forever task
                 let handle = tokio::spawn(async move {
@@ -168,7 +179,12 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
                     }
                 });
 
-                user.set_session_data(ClientData { room_id: None, room_tokens: HashMap::new(), sync_forever_handle: handle });
+                user.set_session_data(ClientData {
+                    room_id: None,
+                    room_tokens: HashMap::new(),
+                    room_messages: HashMap::new(),
+                    sync_forever_handle: handle }
+                );
 
                 Ok(())
             },
@@ -224,7 +240,7 @@ async fn task_scheduler(user: &mut GooseUser) -> TransactionResult {
     }
 
     // Scheduler setup
-    let index_weights = [11, 3, 4, 1, 1, 1, 0, 0];
+    let index_weights = [11, 3, 4, 1, 1, 1, 0, 1];
     let task_gen = WalkerTableBuilder::new(&index_weights).build();
 
     // Task scheduler loop
@@ -255,6 +271,25 @@ async fn task_scheduler(user: &mut GooseUser) -> TransactionResult {
     Ok(())
 }
 
+async fn on_room_message(event: OriginalSyncRoomMessageEvent, room: Room, client: GooseMatrixClient) {
+    // Consider protecting with RwLock, or enforce sync and user tasks run only on the same thread
+    let user: &mut GooseUser = unsafe { GOOSE_USERS[client.inner.goose_user_index].as_mut().unwrap() };
+    let client_data = user.get_session_data_mut::<ClientData>().unwrap();
+    // println!("Got message '{}' in room {}", event.content.body(), room.room_id());
+
+    // Add the new messages to whatever we had before (if anything)
+    match client_data.room_messages.get_mut(&room.room_id().to_owned()) {
+        Some(messages) => {
+            messages.push(event);
+        },
+        None => {
+            let mut room_messages = Vec::new();
+            room_messages.push(event.to_owned());
+            client_data.room_messages.insert(room.room_id().to_owned(), room_messages);
+        },
+    }
+}
+
 async fn do_nothing(_user: &mut GooseUser) -> TransactionResult {
     let exp = Exp::new(0.1).unwrap();
     let delay = exp.sample(&mut rand::thread_rng());
@@ -267,23 +302,17 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
     let user_index = user.weighted_users_index;
     let client = get_client(user_index).await;
     let username = client.user_id().unwrap().localpart();
-    use ruma::api::client::typing::create_typing_event::v3::Request as TypingRequest;
-    use ruma::api::client::typing::create_typing_event::v3::Typing as Typing;
     use ruma::api::client::message::send_message_event::v3::Request as MessageRequest;
     use ruma::events::room::message::RoomMessageEventContent as RoomMessage;
 
     // Send the typing notification like a real client would
-    let user_id = client.user_id().unwrap().to_owned();
     let room_id;
-
     match user.get_session_data::<ClientData>().unwrap().room_id.to_owned() {
         Some(id) => {room_id = id.to_owned(); },
         None => return Ok(()),
     }
 
-    let typing = Typing::Yes(Duration::from_secs(30));
-    let request = TypingRequest::new(user_id, room_id.to_owned(), typing);
-    if client.send(request, None).await.is_err() {
+    if client.get_joined_room(&room_id).unwrap().typing_notice(true).await.is_err() {
         println!("[{}] failed sending typing notification", username);
     }
 
@@ -310,25 +339,90 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
 async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
     let user_index = user.weighted_users_index;
     let client = get_client(user_index).await;
+    let client_data = user.get_session_data::<ClientData>().unwrap();
     let username = client.user_id().unwrap().localpart();
-    use ruma::api::client::message::send_message_event::v3::Request as MessageRequest;
-    use ruma::events::room::message::RoomMessageEventContent as RoomMessage;
+    use ruma::api::client::receipt::create_receipt::v3::ReceiptType as ReceiptType;
+    use ruma_common::events::receipt::ReceiptThread as ReceiptThread;
+
+    let room_id;
+    match client.joined_rooms().choose(&mut rand::thread_rng()) {
+        Some(joined) => room_id = joined.room_id().to_owned(),
+        None => return Ok(()),
+    }
+
+    // println!("[{}] Looking at room [{}]", username, room_id);
+
+    // load_data_for_room
+    //     # FIXME Need to parse the room state for all of this :-\
+    //     ## FIXME Load the room displayname and avatar url
+    //     ## FIXME If we don't have it, load the avatar image
+    //     #room_displayname = self.room_display_names.get(room_id, None)
+    //     #if room_displayname is None:
+    //     #  # Uh-oh, do we need to parse the room state from /sync in order to get this???
+    //     #  pass
+    //     #room_avatar_url = self.room_avatar_urls.get(room_id, None)
+    //     #if room_avatar_url is None:
+    //     #  # Uh-oh, do we need to parse the room state from /sync in order to get this???
+    //     #  pass
+    //     ## Note: We may have just set room_avatar_url in the code above
+    //     #if room_avatar_url is not None and self.media_cache.get(room_avatar_url, False) is False:
+    //     #  # FIXME Download the image and set the cache to True
+    //     #  pass
+
+    // Load the avatars for recent users
+    // Load the thumbnails for any messages that have one
+    // for message in client_data.recent_messages.get(&room_id).into_iter().flatten() {
+    //     // let sender_user_id = message.sender;
+    //     // let sender_avatar_mxc = client_data.user_avatar_urls.get(&message.sender);
+    //     // client.get_profile(user_id)
+
+    //     if let Ok(Some(profile)) = client.store().get_profile(&room_id, &message.sender).await {
+    //         if let Some(state_event) = profile.as_original() {
+    //             // Get avatar URL and download if necessary
+    //             if state_event.content.avatar_url.is_none() {
+
+    //             }
+    //         }
+    //         // download avatar / get url
+    //         client.store()
+    //     }
 
 
-    // room_id = self.get_random_roomid()
-    // if room_id is None:
-    //     #logging.warning("User [%s] couldn't get a roomid for look_at_room" % self.username)
-    //     return
-    // #logging.info("User [%s] looking at room [%s]" % (self.username, room_id))
+    // sender_userid = message.sender
+    // sender_avatar_mxc = self.user_avatar_urls.get(sender_userid, None)
+    // if sender_avatar_mxc is None:
+    //     # FIXME Fetch the avatar URL for sender_userid
+    //     # FIXME Set avatar_mxc
+    //     # FIXME Set self.user_avatar_urls[sender_userid]
+    //     self.matrix_client.get_avatar(sender_userid)
+    // # Try again.  Maybe we were able to populate the cache in the line above.
+    // sender_avatar_mxc = self.user_avatar_urls.get(sender_userid, None)
+    // # Now avatar_mxc might not be None, even if it was above
+    // if sender_avatar_mxc is not None and len(sender_avatar_mxc) > 0:
+    //     # FIXME Reimplement method with nio after avatar support is added
+    //     self.download_matrix_media(sender_avatar_mxc)
+    // sender_displayname = self.user_display_names.get(sender_userid, None)
+    // if sender_displayname is None:
+    //     sender_displayname = self.matrix_client.get_displayname(sender_userid)
 
-    // self.load_data_for_room(room_id)
+    // }
 
-    // if len(self.recent_messages.get(room_id, [])) < 1:
-    //     return
+    //     # Currently users only send text messages
+    //     # for message in messages:
+    //     #     content = message.content
+    //     #     msgtype = content.msgtype
+    //     #     if msgtype in ["m.image", "m.video", "m.file"]:
+    //     #         thumb_mxc = message.content.get("thumbnail_url", None)
+    //     #         if thumb_mxc is not None:
+    //     #             self.download_matrix_media(thumb_mxc)
 
-    // event_id = self.recent_messages[room_id][-1].event_id
-    // self.matrix_client.update_receipt_marker(room_id, event_id)
 
+    if let Some(events) = client_data.room_messages.get(&room_id) {
+        let event_id = events.last().unwrap().event_id.to_owned();
+        if client.get_joined_room(&room_id).unwrap().send_single_receipt(ReceiptType::Read, ReceiptThread::Unthreaded, event_id).await.is_err() {
+            println!("[{}] failed to update read marker in room [{}]", username, room_id);
+        }
+    }
 
     Ok(())
 }
@@ -394,14 +488,12 @@ async fn change_displayname(user: &mut GooseUser) -> TransactionResult {
     let user_index = user.weighted_users_index;
     let client = get_client(user_index).await;
     let username = client.user_id().unwrap().localpart();
-    use ruma::api::client::profile::set_display_name::v3::Request as Request;
 
     let user_number = *username.split(".").collect::<Vec<&str>>().last().unwrap();
     let random_number = rand::thread_rng().gen_range(1 .. 1000);
     let new_name = format!("User {} (random={})", user_number, random_number);
 
-    let request = Request::new(client.user_id().unwrap().to_owned(), Some(new_name.to_owned()));
-    if client.send(request, None).await.is_err() {
+    if client.account().set_display_name(Some(&new_name)).await.is_err() {
         println!("[{}] failed to set displayname to {}", username, new_name);
     }
 
@@ -420,58 +512,41 @@ async fn send_image(user: &mut GooseUser) -> TransactionResult {
 async fn send_reaction(user: &mut GooseUser) -> TransactionResult {
     let user_index = user.weighted_users_index;
     let client = get_client(user_index).await;
+    let client_data = user.get_session_data::<ClientData>().unwrap();
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::message::send_message_event::v3::Request as MessageRequest;
-    use ruma::events::room::message::RoomMessageEventContent as RoomMessage;
+    use ruma_common::events::MessageLikeEventType as MessageLikeEventType;
 
     // Pick a recent message from the selected room, and react to it
-    // let user_id = client.user_id().unwrap().to_owned();
-    // let room_id;
-    // match client.joined_rooms().choose(&mut rand::thread_rng()) {
-    //     Some(joined) => room_id = joined.room_id().to_owned(),
-    //     None => return Ok(()),
-    // }
+    let room_id;
+    match client.joined_rooms().choose(&mut rand::thread_rng()) {
+        Some(joined) => room_id = joined.room_id().to_owned(),
+        None => return Ok(()),
+    }
 
-    // let messages = client.get_joined_room(room_id).unwrap().messages(options)
-    // let room = client.joined_rooms()
-    //                               .choose(&mut rand::thread_rng())
-    //                               .unwrap().to_owned();
-    // let room_id = room.room_id().to_owned();
-    // if room.messages(options)
+    if let Some(messages) = client_data.room_messages.get(&room_id) {
+        let slice_start = if messages.len() > 10 { messages.len() - 11 } else { 0 };
+        let message = messages[slice_start ..].choose(&mut rand::thread_rng()).unwrap();
+        let reaction = ["💩","👍","❤️", "👎", "🤯", "😱", "👏"].choose(&mut rand::thread_rng());
+        let content = to_raw_value(&json!({
+            "m.relates_to": {
+                "rel_type": "m.annotation",
+                "event_id": message.event_id,
+                "key": reaction,
+            }
+        })).unwrap();
 
+        // # Prevent errors with reacting to the same message with the same reaction
+        // if (message, reaction) in self.reacted_messages:
+        //     return
+        // else:
+        //     self.reacted_messages.append((message, reaction))
 
-
-    // if len(self.user.recent_messages.get(self.room_id, [])) < 1:
-    // return
-
-    // message = random.choice(self.user.recent_messages[self.room_id])
-    // reaction = random.choice(["💩","👍","❤️", "👎", "🤯", "😱", "👏"])
-    // content = {
-    //     "m.relates_to": {
-    //         "rel_type": "m.annotation",
-    //         "event_id": message.event_id,
-    //         "key": reaction,
-    //     }
-    // }
-
-    // Prevent errors with reacting to the same message with the same reaction
-    // if (message, reaction) in self.reacted_messages:
-    //     return
-    // else:
-    //     self.reacted_messages.append((message, reaction))
-
-
-    // let content = RoomMessage::text_plain(words[0 .. message_len].join(" "));
-    // let content = RoomMessage::
-    // let request = MessageRequest::new(room_id.to_owned(), TransactionId::new(), &content).unwrap();
-    // if client.send(request, None).await.is_err() {
-    //     println!("[{}] failed to send reaction in room [{}]", username, room_id);
-    // }
-
-    // response = self.user.matrix_client.room_send(self.room_id, "m.reaction", content)
-    // if isinstance(response, RoomSendError):
-        // logging.error("[%s] failed to send reaction in room [%s]: Code=%s, Message=%s",
-                    //   self.user.matrix_client.user, response.room_id, response.status_code, response.message)
+        let request = MessageRequest::new_raw(room_id.to_owned(), TransactionId::new(), MessageLikeEventType::Reaction, Raw::from_json(content));
+        if client.send(request, None).await.is_err() {
+            println!("[{}] failed to send reaction in room [{}]", username, room_id);
+        }
+    }
 
     Ok(())
 }
