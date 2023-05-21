@@ -67,7 +67,7 @@ use crate::matrix::{
 
 mod context;
 mod maps;
-// mod static_events;
+mod static_events;
 
 pub use self::context::{Ctx, EventHandlerContext, RawEvent};
 

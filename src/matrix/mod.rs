@@ -112,7 +112,7 @@ mod error;
 mod login_builder;
 mod http_client;
 mod media;
-mod room;
+pub mod room;
 mod sync;
 
 #[cfg(feature = "sso-login")]
