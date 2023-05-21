@@ -226,7 +226,8 @@ impl GooseMatrixClient {
         }
     }
 
-    pub(crate) async fn delay_sync(last_sync_time: &mut Option<Instant>) {
+    // pub(crate) async fn delay_sync(last_sync_time: &mut Option<Instant>) {
+    pub async fn delay_sync(last_sync_time: &mut Option<Instant>) {
         let now = Instant::now();
 
         // If the last sync happened less than a second ago, sleep for a

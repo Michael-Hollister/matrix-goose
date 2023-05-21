@@ -152,6 +152,9 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
                 println!("[{}] Logged in successfully", username);
                 client.add_event_handler(on_room_message);
 
+                // Replicate `sync` method behavior from the SDK client
+                let mut last_sync_time: Option<std::time::Instant> = None;
+
                 // Spawn sync_forever task
                 let handle = tokio::spawn(async move {
                     // println!("Spawning sync_forever task");
@@ -176,6 +179,9 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
                                 break;
                             }
                         }
+
+                        // Replicate `sync` method behavior from the SDK client
+                        GooseMatrixClient::delay_sync(&mut last_sync_time).await
                     }
                 });
 
@@ -240,7 +246,7 @@ async fn task_scheduler(user: &mut GooseUser) -> TransactionResult {
     }
 
     // Scheduler setup
-    let index_weights = [11, 3, 4, 1, 1, 1, 0, 1];
+    let index_weights = [11, 6, 4, 2, 1, 1, 0, 1];
     let task_gen = WalkerTableBuilder::new(&index_weights).build();
 
     // Task scheduler loop
