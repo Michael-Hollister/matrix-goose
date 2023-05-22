@@ -135,18 +135,22 @@ async fn teardown(_user: &mut GooseUser) -> TransactionResult {
 
 async fn on_start(user: &mut GooseUser) -> TransactionResult {
     let user_index = user.weighted_users_index;
+    let client: Arc<GooseMatrixClient>;
     unsafe {
         let host = user.base_url.to_owned();
         GOOSE_USERS.push(user);
 
         let static_client_ref = Arc::new(GooseMatrixClient::new(host, user_index).await.unwrap());
         CLIENTS.insert(user_index, static_client_ref);
+        client = Arc::clone(&CLIENTS[&user_index]);
+    }
 
-        let client = Arc::clone(&CLIENTS[&user_index]);
-        let csv_user = &USERS_READER[user_index];
-        let username = csv_user.username.to_owned();
-        let password = csv_user.password.to_owned();
+    let csv_user = &USERS_READER[user_index];
+    let username = csv_user.username.to_owned();
+    let password = csv_user.password.to_owned();
+    let mut retries = 3;
 
+    while retries > 0 {
         match client.login_username(&username, &password).send().await {
             Ok(_) => {
                 println!("[{}] Logged in successfully", username);
@@ -192,14 +196,19 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
                     sync_forever_handle: handle }
                 );
 
-                Ok(())
+                return Ok(());
             },
-            Err(error) => {
-                println!("[{}] Error logging in: {:?}", username, error);
-                Ok(())
+            Err(err) => {
+                println!("[{}] Could not login user (attempt {}): {:?}. Trying again...",
+                username, 4 - retries, err);
+                retries -= 1;
             }
         }
     }
+
+    println!("Failed login for user {}. Skipping...", username);
+
+    Ok(())
 }
 
 async fn on_stop(user: &mut GooseUser) -> TransactionResult {
