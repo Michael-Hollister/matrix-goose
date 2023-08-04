@@ -67,28 +67,33 @@ were not originally intended to stress the server.
 You may need to play around with the total number of users and the hatch rate
 to find a configuration that your homeserver can handle.
 
+0. Set your homeserver URL
+```console
+[user@host matrix-goose]$ export HOMESERVER=https://your.homeserver.tld
+```
+
 1. Registering user accounts
 
 ```console
-[user@host matrix-goose]$ cargo run --bin register --release -- --host YOUR_HOMESERVER --report-file=register.html --users 1000 --iterations 1 --hatch-rate 10
+[user@host matrix-goose]$ cargo run --bin register --release -- --host $HOMESERVER --report-file=register.html --users 1000 --iterations 1 --hatch-rate 10
 ```
 
 2. Creating rooms
 
 ```console
-[user@host matrix-goose]$ cargo run --bin create_room --release -- --host YOUR_HOMESERVER --report-file=create_room.html --users 1000 --iterations 1 --hatch-rate 10
+[user@host matrix-goose]$ cargo run --bin create_room --release -- --host $HOMESERVER --report-file=create_room.html --users 1000 --iterations 1 --hatch-rate 10
 ```
 
 3. Accepting invites to join rooms
 
 ```console
-[user@host matrix-goose]$ cargo run --bin join --release -- --host YOUR_HOMESERVER --report-file=join.html --users 1000 --iterations 1 --hatch-rate 10
+[user@host matrix-goose]$ cargo run --bin join --release -- --host $HOMESERVER --report-file=join.html --users 1000 --iterations 1 --hatch-rate 10
 ```
 
 4. Normal chat activity -- Accepting any pending invites, sending messages, paginating rooms
 
 ```console
-[user@host matrix-goose]$ cargo run --bin chat --release -- --host YOUR_HOMESERVER --report-file=chat.html --no-reset-metrics --users 1000 --hatch-rate 10
+[user@host matrix-goose]$ cargo run --bin chat --release -- --host $HOMESERVER --report-file=chat.html --no-reset-metrics --users 1000 --hatch-rate 10
 ```
 
 Note that you also have the ability to modify parameters at runtime. See the
