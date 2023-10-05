@@ -1,27 +1,11 @@
 use goose::prelude::*;
-use std::{
-    time::Duration,
-    fs::File,
-    io::BufReader,
-};
 use serde::Deserialize;
+use std::{fs::File, io::BufReader, time::Duration};
 
-use matrix_sdk::ruma::{
-    api::client::{
-        room::{
-            create_room::v3::Request as CreateRoomRequest,
-        }
-    },
-};
-use ruma_common::{
-    UserId, OwnedUserId,
-};
+use matrix_sdk::ruma::api::client::room::create_room::v3::Request as CreateRoomRequest;
+use ruma_common::{OwnedUserId, UserId};
 
-use matrix_goose::matrix::{
-    GooseMatrixClient,
-    GOOSE_USERS,
-};
-
+use matrix_goose::matrix::{GooseMatrixClient, GOOSE_USERS};
 
 #[derive(Debug, Deserialize)]
 struct User {
@@ -41,14 +25,14 @@ struct RoomList {
     creators: Vec<RoomInfo>,
 }
 
-
 // For setup tests, only a single thread access its own client
 static mut USERS: Vec<User> = Vec::new();
 static USERS_READER: &Vec<User> = unsafe { &USERS };
 
-static mut ROOMS: RoomList = RoomList { creators: Vec::new() };
+static mut ROOMS: RoomList = RoomList {
+    creators: Vec::new(),
+};
 static ROOMS_READER: &RoomList = unsafe { &ROOMS };
-
 
 async fn setup(user: &mut GooseUser) -> TransactionResult {
     println!("Setting up loadtest...");
@@ -57,7 +41,7 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
     unsafe {
         let num_users = user.config.users.unwrap();
 
-        for _ in 0 .. num_users {
+        for _ in 0..num_users {
             GOOSE_USERS.push(std::ptr::null_mut());
         }
 
@@ -68,11 +52,11 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
                         Ok(record) => {
                             // println!("{:?}", record);
                             USERS.push(record);
-                        },
+                        }
                         Err(err) => panic!("Error reading user from users.csv: {}", err),
                     }
                 }
-            },
+            }
             Err(err) => panic!("Error reading users.csv: {}", err),
         }
 
@@ -87,10 +71,10 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
                 match serde_json::from_reader::<_, RoomList>(reader) {
                     Ok(rooms) => {
                         ROOMS = rooms;
-                    },
+                    }
                     Err(err) => panic!("Error reading rooms.json contents: {}", err),
                 }
-            },
+            }
             Err(err) => panic!("Error reading rooms.json: {}", err),
         }
     }
@@ -104,13 +88,15 @@ async fn teardown(_user: &mut GooseUser) -> TransactionResult {
     Ok(())
 }
 
-
 async fn create_room(user: &mut GooseUser) -> TransactionResult {
     let user_index = user.weighted_users_index;
 
     // Load the next user who needs to be registered
     let csv_user = &USERS_READER[user_index];
-    println!("User {}: Got user/pass {} {}", user_index, csv_user.username, csv_user.password);
+    println!(
+        "User {}: Got user/pass {} {}",
+        user_index, csv_user.username, csv_user.password
+    );
 
     // Create matrix client
     let username = &csv_user.username.to_owned();
@@ -120,12 +106,21 @@ async fn create_room(user: &mut GooseUser) -> TransactionResult {
     // Populate static table used by matrix API for interfacing with Goose
     unsafe { GOOSE_USERS[user_index] = user };
 
-    if ROOMS_READER.creators.iter().filter(|&room_info| room_info.creator == *username).count() > 0 {
+    if ROOMS_READER
+        .creators
+        .iter()
+        .filter(|&room_info| room_info.creator == *username)
+        .count()
+        > 0
+    {
         let client = GooseMatrixClient::new(host, user_index).await.unwrap();
 
         match client.login_username(username, password).send().await {
             Ok(_) => {
-                let rooms_iter = ROOMS_READER.creators.iter().filter(|&room_info| room_info.creator == *username);
+                let rooms_iter = ROOMS_READER
+                    .creators
+                    .iter()
+                    .filter(|&room_info| room_info.creator == *username);
 
                 for room_info in rooms_iter {
                     let mut request = CreateRoomRequest::new();
@@ -134,7 +129,13 @@ async fn create_room(user: &mut GooseUser) -> TransactionResult {
                     let mut invite_list: Vec<OwnedUserId> = Vec::new();
 
                     for name in room_info.users.iter() {
-                        let host = client.homeserver().await.host_str().unwrap().to_owned().replace("matrix.", "");
+                        let host = client
+                            .homeserver()
+                            .await
+                            .host_str()
+                            .unwrap()
+                            .to_owned()
+                            .replace("matrix.", "");
                         let full_name = "@".to_owned() + name + ":" + &host;
                         let user_id = <&UserId>::try_from(full_name.as_str()).unwrap().to_owned();
 
@@ -153,29 +154,32 @@ async fn create_room(user: &mut GooseUser) -> TransactionResult {
                             Ok(response) => {
                                 println!("[{}] Created room {}", username, response.room_id());
                                 break;
-                            },
+                            }
                             Err(err) => {
                                 println!("[{}] Could not create room {} (attempt {}): {:?}. Trying again...",
                                     username, room_name, 4 - retries, err);
                                 retries -= 1;
 
                                 if retries == 0 {
-                                    println!("[{}] Error creating room {}. Skipping...", username, room_name);
+                                    println!(
+                                        "[{}] Error creating room {}. Skipping...",
+                                        username, room_name
+                                    );
                                     break;
                                 }
-                            },
+                            }
                         }
                     }
                 }
-            },
-            Err(err) => { println!("[{}] Failed login: {:?}", username, err); },
+            }
+            Err(err) => {
+                println!("[{}] Failed login: {:?}", username, err);
+            }
         }
     }
 
     Ok(())
 }
-
-
 
 #[tokio::main]
 async fn main() -> Result<(), GooseError> {
@@ -184,9 +188,10 @@ async fn main() -> Result<(), GooseError> {
     // Run test
     GooseAttack::initialize()?
         .test_start(transaction!(setup))
-        .register_scenario(scenario!("Create Room")
-            .register_transaction(transaction!(create_room))
-            .set_wait_time(Duration::ZERO, Duration::ZERO)?
+        .register_scenario(
+            scenario!("Create Room")
+                .register_transaction(transaction!(create_room))
+                .set_wait_time(Duration::ZERO, Duration::ZERO)?,
         )
         .test_stop(transaction!(teardown))
         .set_default(GooseDefault::HatchRate, "32")?
@@ -195,4 +200,3 @@ async fn main() -> Result<(), GooseError> {
 
     Ok(())
 }
-

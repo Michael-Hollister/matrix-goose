@@ -2,20 +2,9 @@ use goose::prelude::*;
 use ruma::api::client::uiaa::Dummy;
 use std::time::Duration;
 
-use matrix_sdk::ruma::{
-    api::client::{
-        account::register::{v3::Request as RegistrationRequest},
-        uiaa,
-    },
-};
+use matrix_sdk::ruma::api::client::{account::register::v3::Request as RegistrationRequest, uiaa};
 
-use matrix_goose::{
-    matrix::{
-        GooseMatrixClient,
-        GOOSE_USERS,
-    },
-};
-
+use matrix_goose::matrix::{GooseMatrixClient, GOOSE_USERS};
 
 #[derive(Debug, serde::Deserialize)]
 struct User {
@@ -34,7 +23,7 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
     unsafe {
         let num_users = user.config.users.unwrap();
 
-        for _ in 0 .. num_users {
+        for _ in 0..num_users {
             GOOSE_USERS.push(std::ptr::null_mut());
         }
 
@@ -45,11 +34,11 @@ async fn setup(user: &mut GooseUser) -> TransactionResult {
                         Ok(record) => {
                             // println!("{:?}", record);
                             USERS.push(record);
-                        },
+                        }
                         Err(err) => panic!("Error reading user from users.csv: {}", err),
                     }
                 }
-            },
+            }
             Err(err) => panic!("Error reading users.csv: {}", err),
         }
     }
@@ -68,7 +57,10 @@ async fn register(user: &mut GooseUser) -> TransactionResult {
 
     // Load the next user who needs to be registered
     let csv_user = &USERS_READER[user_index];
-    println!("User {}: Got user/pass {} {}", user_index, csv_user.username, csv_user.password);
+    println!(
+        "User {}: Got user/pass {} {}",
+        user_index, csv_user.username, csv_user.password
+    );
 
     // Create matrix client
     let username = csv_user.username.to_owned();
@@ -92,12 +84,16 @@ async fn register(user: &mut GooseUser) -> TransactionResult {
             Ok(_) => {
                 println!("[{}] User registration success", username);
                 return Ok(());
-            },
+            }
             Err(err) => {
-                println!("[{}] Could not register user (attempt {}): {:?}. Trying again...",
-                    username, 4 - retries, err);
+                println!(
+                    "[{}] Could not register user (attempt {}): {:?}. Trying again...",
+                    username,
+                    4 - retries,
+                    err
+                );
                 retries -= 1;
-            },
+            }
         }
     }
 
@@ -113,9 +109,10 @@ async fn main() -> Result<(), GooseError> {
     // Run test
     GooseAttack::initialize()?
         .test_start(transaction!(setup))
-        .register_scenario(scenario!("Register")
-            .register_transaction(transaction!(register))
-            .set_wait_time(Duration::ZERO, Duration::ZERO)?
+        .register_scenario(
+            scenario!("Register")
+                .register_transaction(transaction!(register))
+                .set_wait_time(Duration::ZERO, Duration::ZERO)?,
         )
         .test_stop(transaction!(teardown))
         .set_default(GooseDefault::HatchRate, "32")?

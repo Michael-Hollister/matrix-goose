@@ -1,46 +1,34 @@
 use goose::prelude::*;
-use rand::Rng;
 use rand::seq::SliceRandom;
+use rand::Rng;
 
 use ruma_common::serde::Raw;
+use std::{collections::HashMap, sync::Arc};
 use tokio::{
+    sync::RwLock,
     task::JoinHandle,
     time::{Duration, Instant},
-    sync::RwLock,
-};
-use std::{
-    collections::HashMap,
-    sync::Arc,
 };
 
-use rand_distr::{Exp, LogNormal, Distribution};
 use once_cell::sync::Lazy;
+use rand_distr::{Distribution, Exp, LogNormal};
 use weighted_rand::builder::*;
 // use duration_string::DurationString;
 use serde_json::{json, value::to_raw_value};
 
 // use matrix_sdk::Client;
-use matrix_sdk::{
-    ruma::{
-        // events::room::message::SyncRoomMessageEvent,
-        events::room::message::OriginalSyncRoomMessageEvent,
-        TransactionId,
-        OwnedRoomId,
-        OwnedUserId,
-    },
+use matrix_sdk::ruma::{
+    // events::room::message::SyncRoomMessageEvent,
+    events::room::message::OriginalSyncRoomMessageEvent,
+    OwnedRoomId,
+    OwnedUserId,
+    TransactionId,
 };
 
 use matrix_goose::{
-    matrix::{
-        GooseMatrixClient,
-        GOOSE_USERS,
-
-        config::SyncSettings,
-        room::Room,
-    },
+    matrix::{config::SyncSettings, room::Room, GooseMatrixClient, GOOSE_USERS},
     task_sleep, CANCELED,
 };
-
 
 #[derive(Debug, Clone, serde::Deserialize)]
 struct User {
@@ -91,8 +79,8 @@ static USERS_READER: &Vec<User> = unsafe { &USERS };
 // Note that a single goose user reference may required shared ownership between two
 // threads (sync_forever and logic thread) depending on the current state of the tokio
 // runtime task scheduler.
-static mut CLIENTS: Lazy<HashMap<usize, Arc<GooseMatrixClient>>> = Lazy::new(|| { HashMap::new() });
-static ATTACK_START: Lazy<Instant> = Lazy::new(|| { Instant::now() });
+static mut CLIENTS: Lazy<HashMap<usize, Arc<GooseMatrixClient>>> = Lazy::new(|| HashMap::new());
+static ATTACK_START: Lazy<Instant> = Lazy::new(|| Instant::now());
 
 const lorem_ipsum_text: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
@@ -112,11 +100,11 @@ async fn setup(_user: &mut GooseUser) -> TransactionResult {
                         Ok(record) => {
                             // println!("{:?}", record);
                             USERS.push(record);
-                        },
+                        }
                         Err(err) => panic!("Error reading user from users.csv: {}", err),
                     }
                 }
-            },
+            }
             Err(err) => panic!("Error reading users.csv: {}", err),
         }
 
@@ -171,9 +159,9 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
                         match client.sync_once(sync_settings.clone()).await {
                             Ok(response) => {
                                 sync_settings = sync_settings.token(response.next_batch.clone());
-                            },
+                            }
                             // Sync timeout warnings already gets outputted to console and report
-                            Err(_) => {},
+                            Err(_) => {}
                             // Err(err) => { println!("[{}] Sync error: {}", username, err) },
                         }
 
@@ -193,14 +181,18 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
                     room_id: None,
                     room_tokens: HashMap::new(),
                     room_messages: HashMap::new(),
-                    sync_forever_handle: handle }
-                );
+                    sync_forever_handle: handle,
+                });
 
                 return Ok(());
-            },
+            }
             Err(err) => {
-                println!("[{}] Could not login user (attempt {}): {:?}. Trying again...",
-                username, 4 - retries, err);
+                println!(
+                    "[{}] Could not login user (attempt {}): {:?}. Trying again...",
+                    username,
+                    4 - retries,
+                    err
+                );
                 retries -= 1;
             }
         }
@@ -270,14 +262,30 @@ async fn task_scheduler(user: &mut GooseUser) -> TransactionResult {
 
         let index = task_gen.next_rng(&mut rand::thread_rng());
         match TaskIndex::from(index) {
-            TaskIndex::DoNothing => { let _ = do_nothing(user).await; },
-            TaskIndex::SendText => { let _ = send_text(user).await; },
-            TaskIndex::LookAtRoom => { let _ = look_at_room(user).await; },
-            TaskIndex::PaginateRoom => { let _ = paginate_room(user).await; },
-            TaskIndex::GoAFK => { let _ = go_afk(user).await; },
-            TaskIndex::ChangeDisplayName => { let _ = change_displayname(user).await; },
-            TaskIndex::SendImage => { let _ = send_image(user).await; },
-            TaskIndex::SendReaction => { let _ = send_reaction(user).await; },
+            TaskIndex::DoNothing => {
+                let _ = do_nothing(user).await;
+            }
+            TaskIndex::SendText => {
+                let _ = send_text(user).await;
+            }
+            TaskIndex::LookAtRoom => {
+                let _ = look_at_room(user).await;
+            }
+            TaskIndex::PaginateRoom => {
+                let _ = paginate_room(user).await;
+            }
+            TaskIndex::GoAFK => {
+                let _ = go_afk(user).await;
+            }
+            TaskIndex::ChangeDisplayName => {
+                let _ = change_displayname(user).await;
+            }
+            TaskIndex::SendImage => {
+                let _ = send_image(user).await;
+            }
+            TaskIndex::SendReaction => {
+                let _ = send_reaction(user).await;
+            }
         }
 
         task_sleep(0.1, true).await;
@@ -286,22 +294,32 @@ async fn task_scheduler(user: &mut GooseUser) -> TransactionResult {
     Ok(())
 }
 
-async fn on_room_message(event: OriginalSyncRoomMessageEvent, room: Room, client: GooseMatrixClient) {
+async fn on_room_message(
+    event: OriginalSyncRoomMessageEvent,
+    room: Room,
+    client: GooseMatrixClient,
+) {
     // Consider protecting with RwLock, or enforce sync and user tasks run only on the same thread
-    let user: &mut GooseUser = unsafe { GOOSE_USERS[client.inner.goose_user_index].as_mut().unwrap() };
+    let user: &mut GooseUser =
+        unsafe { GOOSE_USERS[client.inner.goose_user_index].as_mut().unwrap() };
     let client_data = user.get_session_data_mut::<ClientData>().unwrap();
     // println!("Got message '{}' in room {}", event.content.body(), room.room_id());
 
     // Add the new messages to whatever we had before (if anything)
-    match client_data.room_messages.get_mut(&room.room_id().to_owned()) {
+    match client_data
+        .room_messages
+        .get_mut(&room.room_id().to_owned())
+    {
         Some(messages) => {
             messages.push(event);
-        },
+        }
         None => {
             let mut room_messages = Vec::new();
             room_messages.push(event.to_owned());
-            client_data.room_messages.insert(room.room_id().to_owned(), room_messages);
-        },
+            client_data
+                .room_messages
+                .insert(room.room_id().to_owned(), room_messages);
+        }
     }
 }
 
@@ -322,12 +340,25 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
 
     // Send the typing notification like a real client would
     let room_id;
-    match user.get_session_data::<ClientData>().unwrap().room_id.to_owned() {
-        Some(id) => {room_id = id.to_owned(); },
+    match user
+        .get_session_data::<ClientData>()
+        .unwrap()
+        .room_id
+        .to_owned()
+    {
+        Some(id) => {
+            room_id = id.to_owned();
+        }
         None => return Ok(()),
     }
 
-    if client.get_joined_room(&room_id).unwrap().typing_notice(true).await.is_err() {
+    if client
+        .get_joined_room(&room_id)
+        .unwrap()
+        .typing_notice(true)
+        .await
+        .is_err()
+    {
         println!("[{}] failed sending typing notification", username);
     }
 
@@ -341,8 +372,7 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
     let mut message_len = f64::round(log_normal.sample(&mut rand::thread_rng())) as usize;
     message_len = usize::max(usize::min(message_len, words.len()), 1);
 
-
-    let content = RoomMessage::text_plain(words[0 .. message_len].join(" "));
+    let content = RoomMessage::text_plain(words[0..message_len].join(" "));
     let request = MessageRequest::new(room_id.to_owned(), TransactionId::new(), &content).unwrap();
     if client.send(request, None).await.is_err() {
         println!("[{}] failed to send/chat in room [{}]", username, room_id);
@@ -356,8 +386,8 @@ async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
     let client = get_client(user_index).await;
     let client_data = user.get_session_data::<ClientData>().unwrap();
     let username = client.user_id().unwrap().localpart();
-    use ruma::api::client::receipt::create_receipt::v3::ReceiptType as ReceiptType;
-    use ruma_common::events::receipt::ReceiptThread as ReceiptThread;
+    use ruma::api::client::receipt::create_receipt::v3::ReceiptType;
+    use ruma_common::events::receipt::ReceiptThread;
 
     let room_id;
     match client.joined_rooms().choose(&mut rand::thread_rng()) {
@@ -402,7 +432,6 @@ async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
     //         client.store()
     //     }
 
-
     // sender_userid = message.sender
     // sender_avatar_mxc = self.user_avatar_urls.get(sender_userid, None)
     // if sender_avatar_mxc is None:
@@ -431,11 +460,19 @@ async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
     //     #         if thumb_mxc is not None:
     //     #             self.download_matrix_media(thumb_mxc)
 
-
     if let Some(events) = client_data.room_messages.get(&room_id) {
         let event_id = events.last().unwrap().event_id.to_owned();
-        if client.get_joined_room(&room_id).unwrap().send_single_receipt(ReceiptType::Read, ReceiptThread::Unthreaded, event_id).await.is_err() {
-            println!("[{}] failed to update read marker in room [{}]", username, room_id);
+        if client
+            .get_joined_room(&room_id)
+            .unwrap()
+            .send_single_receipt(ReceiptType::Read, ReceiptThread::Unthreaded, event_id)
+            .await
+            .is_err()
+        {
+            println!(
+                "[{}] failed to update read marker in room [{}]",
+                username, room_id
+            );
         }
     }
 
@@ -463,8 +500,8 @@ async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
     client_data.room_id = Some(room_id.to_owned());
 
     // Note: consider swapping this with the client API call instead? no need to keep track of tokens
-    use ruma::api::client::message::get_message_events::v3::Request as Request;
-    use ruma::api::Direction as Direction;
+    use ruma::api::client::message::get_message_events::v3::Request;
+    use ruma::api::Direction;
 
     let mut request = Request::new(room_id.to_owned(), Direction::Backward);
     if let Some(token) = client_data.room_tokens.get(&room_id) {
@@ -477,8 +514,11 @@ async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
                 // println!("[{}] Setting room token - Old: {:?}, New: {}", username, client_data.room_tokens.get(&room_id.to_owned()), token);
                 client_data.room_tokens.insert(room_id, token);
             }
-        },
-        Err(_) => println!("[{}] failed /messages failed for room [{}]", username, room_id),
+        }
+        Err(_) => println!(
+            "[{}] failed /messages failed for room [{}]",
+            username, room_id
+        ),
     }
 
     Ok(())
@@ -505,10 +545,15 @@ async fn change_displayname(user: &mut GooseUser) -> TransactionResult {
     let username = client.user_id().unwrap().localpart();
 
     let user_number = *username.split(".").collect::<Vec<&str>>().last().unwrap();
-    let random_number = rand::thread_rng().gen_range(1 .. 1000);
+    let random_number = rand::thread_rng().gen_range(1..1000);
     let new_name = format!("User {} (random={})", user_number, random_number);
 
-    if client.account().set_display_name(Some(&new_name)).await.is_err() {
+    if client
+        .account()
+        .set_display_name(Some(&new_name))
+        .await
+        .is_err()
+    {
         println!("[{}] failed to set displayname to {}", username, new_name);
     }
 
@@ -530,7 +575,7 @@ async fn send_reaction(user: &mut GooseUser) -> TransactionResult {
     let client_data = user.get_session_data::<ClientData>().unwrap();
     let username = client.user_id().unwrap().localpart();
     use ruma::api::client::message::send_message_event::v3::Request as MessageRequest;
-    use ruma_common::events::MessageLikeEventType as MessageLikeEventType;
+    use ruma_common::events::MessageLikeEventType;
 
     // Pick a recent message from the selected room, and react to it
     let room_id;
@@ -540,16 +585,23 @@ async fn send_reaction(user: &mut GooseUser) -> TransactionResult {
     }
 
     if let Some(messages) = client_data.room_messages.get(&room_id) {
-        let slice_start = if messages.len() > 10 { messages.len() - 11 } else { 0 };
-        let message = messages[slice_start ..].choose(&mut rand::thread_rng()).unwrap();
-        let reaction = ["💩","👍","❤️", "👎", "🤯", "😱", "👏"].choose(&mut rand::thread_rng());
+        let slice_start = if messages.len() > 10 {
+            messages.len() - 11
+        } else {
+            0
+        };
+        let message = messages[slice_start..]
+            .choose(&mut rand::thread_rng())
+            .unwrap();
+        let reaction = ["💩", "👍", "❤️", "👎", "🤯", "😱", "👏"].choose(&mut rand::thread_rng());
         let content = to_raw_value(&json!({
             "m.relates_to": {
                 "rel_type": "m.annotation",
                 "event_id": message.event_id,
                 "key": reaction,
             }
-        })).unwrap();
+        }))
+        .unwrap();
 
         // # Prevent errors with reacting to the same message with the same reaction
         // if (message, reaction) in self.reacted_messages:
@@ -557,9 +609,17 @@ async fn send_reaction(user: &mut GooseUser) -> TransactionResult {
         // else:
         //     self.reacted_messages.append((message, reaction))
 
-        let request = MessageRequest::new_raw(room_id.to_owned(), TransactionId::new(), MessageLikeEventType::Reaction, Raw::from_json(content));
+        let request = MessageRequest::new_raw(
+            room_id.to_owned(),
+            TransactionId::new(),
+            MessageLikeEventType::Reaction,
+            Raw::from_json(content),
+        );
         if client.send(request, None).await.is_err() {
-            println!("[{}] failed to send reaction in room [{}]", username, room_id);
+            println!(
+                "[{}] failed to send reaction in room [{}]",
+                username, room_id
+            );
         }
     }
 
@@ -572,23 +632,18 @@ async fn main() -> Result<(), GooseError> {
 
     // Run test
     GooseAttack::initialize()?
-    .test_start(transaction!(setup))
-    .register_scenario(scenario!("Default")
-        .register_transaction(transaction!(on_start)
-            .set_on_start()
-            .set_name("On start"))
-        .register_transaction(transaction!(task_scheduler)
-            .set_name("Scheduler"))
-        .register_transaction(transaction!(on_stop)
-            .set_on_stop()
-            .set_name("On stop"))
-        .set_wait_time(Duration::from_millis(100), Duration::from_millis(200))?
-    )
-    .test_stop(transaction!(teardown))
-    .set_default(GooseDefault::HatchRate, "32")?
-    .execute()
-    .await?;
+        .test_start(transaction!(setup))
+        .register_scenario(
+            scenario!("Default")
+                .register_transaction(transaction!(on_start).set_on_start().set_name("On start"))
+                .register_transaction(transaction!(task_scheduler).set_name("Scheduler"))
+                .register_transaction(transaction!(on_stop).set_on_stop().set_name("On stop"))
+                .set_wait_time(Duration::from_millis(100), Duration::from_millis(200))?,
+        )
+        .test_stop(transaction!(teardown))
+        .set_default(GooseDefault::HatchRate, "32")?
+        .execute()
+        .await?;
 
     Ok(())
 }
-
