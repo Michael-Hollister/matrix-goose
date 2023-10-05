@@ -233,7 +233,7 @@ impl Joined {
 
         if send {
             // self.send_typing_notice(typing).await?;
-            return Ok(self.send_typing_notice(typing).await?);
+            return self.send_typing_notice(typing).await;
         }
 
         Ok(())

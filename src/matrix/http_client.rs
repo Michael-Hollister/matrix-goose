@@ -37,12 +37,11 @@ use ruma::{
 use tracing::{debug, field::debug, instrument, trace};
 
 // use crate::{config::RequestConfig, error::HttpError};
-use goose::{prelude::*, goose::GooseResponse};
+use goose::{prelude::*};
 use reqwest::RequestBuilder;
 use crate::matrix::{
     config::RequestConfig,
     error::HttpError,
-    GooseMatrixClient,
     GOOSE_USERS,
 };
 
@@ -499,31 +498,31 @@ impl HttpSend for reqwest::Client {
         // }
 
 
-        let mut request_builder = RequestBuilder::from_parts(self.clone(), request);
+        let request_builder = RequestBuilder::from_parts(self.clone(), request);
         // request_builder = request_builder.body(body);
         // request_builder.body(request.body().unwrap().clone());
 
         // Fix endpoint naming for reports
-        if let Some(index) = name.find("?") {
+        if let Some(index) = name.find('?') {
             name.truncate(index);
         }
-        if let Some(index) = name.find("!") {
+        if let Some(index) = name.find('!') {
             let (first, last) = name.split_at(index);
-            match last.find("/") {
+            match last.find('/') {
                 Some(index) => name = first.to_owned() + "_" + &last[index .. last.len()],
                 None => name = first.to_owned() + "_",
             }
         }
-        if let Some(index) = name.find("@") {
+        if let Some(index) = name.find('@') {
             let (first, last) = name.split_at(index);
-            match last.find("/") {
+            match last.find('/') {
                 Some(index) => name = first.to_owned() + "_" + &last[index .. last.len()],
                 None => name = first.to_owned() + "_",
             }
         }
-        if let Some(index) = name.find("$") {
+        if let Some(index) = name.find('$') {
             let (first, last) = name.split_at(index);
-            match last.find("/") {
+            match last.find('/') {
                 Some(index) => name = first.to_owned() + "_" + &last[index .. last.len()],
                 None => name = first.to_owned() + "_",
             }

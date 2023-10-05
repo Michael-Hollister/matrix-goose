@@ -41,7 +41,6 @@ use ruma::{
             device::{delete_devices, get_devices, update_device},
             directory::{get_public_rooms, get_public_rooms_filtered},
             discovery::{
-                get_capabilities::{self, Capabilities},
                 get_supported_versions,
             },
             error::ErrorKind,
@@ -57,7 +56,7 @@ use ruma::{
             uiaa::{AuthData, UserIdentifier},
             user_directory::search_users,
         },
-        error::{FromHttpResponseError, IntoHttpError},
+        error::{FromHttpResponseError},
         MatrixVersion, OutgoingRequest, SendAccessToken,
     },
     assign,
@@ -85,14 +84,11 @@ use crate::encryption::Encryption;
 // };
 
 use goose::prelude::*;
-use matrix_sdk::{
-//     // Error, StoreError, HttpError, RefreshTokenError, RumaApiError,
-    StoreError,
-};
+
 use crate::matrix::{
     account::Account,
     builder::{GooseClientBuilder, ClientBuildError},
-    config::{RequestConfig, SyncSettings},
+    config::{RequestConfig},
     error::{Error, HttpError, RumaApiError, RefreshTokenError, HttpResult, Result},
     event_handler::{
         EventHandler, EventHandlerDropGuard, EventHandlerHandle, EventHandlerResult,

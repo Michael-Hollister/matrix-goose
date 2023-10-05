@@ -5,7 +5,6 @@ use rand::Rng;
 use ruma_common::serde::Raw;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    sync::RwLock,
     task::JoinHandle,
     time::{Duration, Instant},
 };
@@ -21,7 +20,6 @@ use matrix_sdk::ruma::{
     // events::room::message::SyncRoomMessageEvent,
     events::room::message::OriginalSyncRoomMessageEvent,
     OwnedRoomId,
-    OwnedUserId,
     TransactionId,
 };
 
@@ -79,13 +77,13 @@ static USERS_READER: &Vec<User> = unsafe { &USERS };
 // Note that a single goose user reference may required shared ownership between two
 // threads (sync_forever and logic thread) depending on the current state of the tokio
 // runtime task scheduler.
-static mut CLIENTS: Lazy<HashMap<usize, Arc<GooseMatrixClient>>> = Lazy::new(|| HashMap::new());
-static ATTACK_START: Lazy<Instant> = Lazy::new(|| Instant::now());
+static mut CLIENTS: Lazy<HashMap<usize, Arc<GooseMatrixClient>>> = Lazy::new(HashMap::new);
+static ATTACK_START: Lazy<Instant> = Lazy::new(Instant::now);
 
 const lorem_ipsum_text: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
 async fn get_client(index: usize) -> Arc<GooseMatrixClient> {
-    unsafe { return Arc::clone(&CLIENTS.get(&index).unwrap()) }
+    unsafe { return Arc::clone(CLIENTS.get(&index).unwrap()) }
 }
 
 async fn setup(_user: &mut GooseUser) -> TransactionResult {
@@ -161,8 +159,7 @@ async fn on_start(user: &mut GooseUser) -> TransactionResult {
                                 sync_settings = sync_settings.token(response.next_batch.clone());
                             }
                             // Sync timeout warnings already gets outputted to console and report
-                            Err(_) => {}
-                            // Err(err) => { println!("[{}] Sync error: {}", username, err) },
+                            Err(_) => {} // Err(err) => { println!("[{}] Sync error: {}", username, err) },
                         }
 
                         // Drop lock after checking canceled status
@@ -367,7 +364,7 @@ async fn send_text(user: &mut GooseUser) -> TransactionResult {
     let delay = exp.sample(&mut rand::thread_rng());
     task_sleep(delay, true).await;
 
-    let words: Vec<&str> = lorem_ipsum_text.split(" ").collect();
+    let words: Vec<&str> = lorem_ipsum_text.split(' ').collect();
     let log_normal = LogNormal::new(1.0, 1.0).unwrap();
     let mut message_len = f64::round(log_normal.sample(&mut rand::thread_rng())) as usize;
     message_len = usize::max(usize::min(message_len, words.len()), 1);
@@ -389,11 +386,10 @@ async fn look_at_room(user: &mut GooseUser) -> TransactionResult {
     use ruma::api::client::receipt::create_receipt::v3::ReceiptType;
     use ruma_common::events::receipt::ReceiptThread;
 
-    let room_id;
-    match client.joined_rooms().choose(&mut rand::thread_rng()) {
-        Some(joined) => room_id = joined.room_id().to_owned(),
+    let room_id = match client.joined_rooms().choose(&mut rand::thread_rng()) {
+        Some(joined) => joined.room_id().to_owned(),
         None => return Ok(()),
-    }
+    };
 
     // println!("[{}] Looking at room [{}]", username, room_id);
 
@@ -490,11 +486,10 @@ async fn paginate_room(user: &mut GooseUser) -> TransactionResult {
     let client = get_client(user_index).await;
     let username = client.user_id().unwrap().localpart();
 
-    let room_id;
-    match client.joined_rooms().choose(&mut rand::thread_rng()) {
-        Some(joined) => room_id = joined.room_id().to_owned(),
+    let room_id = match client.joined_rooms().choose(&mut rand::thread_rng()) {
+        Some(joined) => joined.room_id().to_owned(),
         None => return Ok(()),
-    }
+    };
 
     let client_data = user.get_session_data_mut::<ClientData>().unwrap();
     client_data.room_id = Some(room_id.to_owned());
@@ -544,7 +539,7 @@ async fn change_displayname(user: &mut GooseUser) -> TransactionResult {
     let client = get_client(user_index).await;
     let username = client.user_id().unwrap().localpart();
 
-    let user_number = *username.split(".").collect::<Vec<&str>>().last().unwrap();
+    let user_number = *username.split('.').collect::<Vec<&str>>().last().unwrap();
     let random_number = rand::thread_rng().gen_range(1..1000);
     let new_name = format!("User {} (random={})", user_number, random_number);
 
@@ -560,7 +555,7 @@ async fn change_displayname(user: &mut GooseUser) -> TransactionResult {
     Ok(())
 }
 
-async fn send_image(user: &mut GooseUser) -> TransactionResult {
+async fn send_image(_user: &mut GooseUser) -> TransactionResult {
     // # Choose an image to send/upload
     // # Upload the thumbnail -- FIXME We need to have all of the thumbnails created and stored *before* we start the test.  Performance will be awful if we're trying to dynamically resample the images on-the-fly here in the load generator.
     // # Upload the image data, get back an MXC URL
@@ -578,11 +573,11 @@ async fn send_reaction(user: &mut GooseUser) -> TransactionResult {
     use ruma_common::events::MessageLikeEventType;
 
     // Pick a recent message from the selected room, and react to it
-    let room_id;
-    match client.joined_rooms().choose(&mut rand::thread_rng()) {
-        Some(joined) => room_id = joined.room_id().to_owned(),
+
+    let room_id = match client.joined_rooms().choose(&mut rand::thread_rng()) {
+        Some(joined) => joined.room_id().to_owned(),
         None => return Ok(()),
-    }
+    };
 
     if let Some(messages) = client_data.room_messages.get(&room_id) {
         let slice_start = if messages.len() > 10 {

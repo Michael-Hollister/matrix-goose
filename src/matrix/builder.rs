@@ -105,7 +105,7 @@ impl GooseClientBuilder {
             appservice_mode: false,
             server_versions: None,
             handle_refresh_tokens: false,
-            goose_user_index: goose_user_index,
+            goose_user_index,
         }
     }
 
